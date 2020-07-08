@@ -9,22 +9,22 @@ import DPM
 def main():
     parser = argparse.ArgumentParser()
     #Add positional/optional parameters
-    parser.add_argument('-d', '--device_limit', help='Limit for number of devices. Default: 0', type=int, default=0)
-    parser.add_argument('-f', '--device_file', help='Csv file name containing the list of devices. Newline delimited. No default value.')
-    parser.add_argument('-o', '--output_file', help='Name of the output file for the hdf5 file. Default: data.h5', default='data.h5')
-    parser.add_argument('-n', '--node', help='Name of the node.', default=None, type=str)
-        #Error when not using the default value
+    parser.add_argument('-d', '--device_limit', help='Limit for number of devices. Default: 0. type=int', type=int, default=0)
+    parser.add_argument('-f', '--device_file', help='Filename containing the list of devices. Newline delimited. No default value. type=str', type=str)
+    parser.add_argument('-o', '--output_file', help='Name of the output file for the hdf5 file. Default: data.h5. type=str', default='data.h5', type=str)
+    parser.add_argument('-n', '--node', help='Name of the node. type=str', default=None, type=str)
     #group 1
+
     #Midnight to midnight currently.
-    parser.add_argument("-s", "--start_date", type=lambda s: datetime.datetime.strptime(s, '%Y-%m-%d'), help='Enter the start time/date. Do not use the duration tag', required=False)
-    parser.add_argument("-e", "--end_date", type=lambda s: datetime.datetime.strptime(s, '%Y-%m-%d'), help='Enter the start time/date. Do not use the duration tag', required=False)
+    parser.add_argument("-s", "--start_date", type=lambda s: datetime.datetime.strptime(s, '%Y-%m-%d'), help='Enter the start time/date. Do not use the duration tag. type=datetime.datetime', required=False)
+    parser.add_argument("-e", "--end_date", type=lambda s: datetime.datetime.strptime(s, '%Y-%m-%d'), help='Enter the end time/date. Do not use the duration tag. type=datetime.datetime', required=False)
     #group 2
-    parser.add_argument("-du", "--duration", help="Enter LOGGERDURATION in sec", required=False)
+    parser.add_argument("-du", "--duration", help="Enter LOGGERDURATION in sec. type=str", required=False, type=str)
     #Parse the args
     args = parser.parse_args()
     sys.stdout.write(str(hdf_code(args)))
 
-def local_to_utc(date):
+def local_to_utc_ms(date):
     utc_timezone = datetime.timezone(datetime.timedelta(0))
     utc_datetime_obj = date.astimezone(utc_timezone)
     time_in_ms = int(utc_datetime_obj.timestamp() * 1000)
@@ -45,16 +45,21 @@ def hdf_code(args):
         print("-d and -s|-e are mutually exclusive! Exiting ...")
         sys.exit(2)
 
-    elif(START_DATE and END_DATE):
-        time_window = 'LOGGER:' + str(local_to_utc(START_DATE)) + ':' + str(local_to_utc(END_DATE))
-        request_string = time_window
+    elif START_DATE and END_DATE:
+        request_string = 'LOGGER:' + str(local_to_utc_ms(START_DATE)) + ':' + str(local_to_utc_ms(END_DATE))
+    
+    elif START_DATE and not END_DATE:
+        END_DATE = datetime.datetime.now()  #This is not midnight time
+        request_string = 'LOGGER:' + str(local_to_utc_ms(START_DATE)) + ':' + str(local_to_utc_ms(END_DATE))
 
-    elif DURATION:
-        DURATION *= 1000
-        DURATION = str(DURATION)
-        DURATION = 'LOGGERDURATION:' + DURATION
-        request_string = DURATION
+    elif END_DATE and not START_DATE:
+        print('Just entering end date is invalid. Please enter start date AND end date, or just start date.')
+        sys.exit(2)
         
+    elif DURATION:
+        DURATION = int(DURATION) * 1000
+        request_string = 'LOGGERDURATION:' + str(DURATION)
+
     if NODE:
         request_string += ':' + NODE
     
@@ -63,7 +68,7 @@ def hdf_code(args):
     with open(DEVICE_FILE) as f:
         DEVICE_LIST = [line.rstrip() for index, line in enumerate(f)
             if index < DEVICE_LIMIT or DEVICE_LIMIT < 1]
-    dpm = DPM.Blocking(None)     #Do not commit with 'DPMJ@VIRT01'
+    dpm = DPM.Blocking(None, 'DPMJ@VIRT01')     #Do not commit with 'DPMJ@VIRT01'
     for index, device in enumerate(DEVICE_LIST):
         dpm.add_entry(index, device)
 
