@@ -68,7 +68,7 @@ def hdf_code(args):
     with open(DEVICE_FILE) as f:
         DEVICE_LIST = [line.rstrip() for index, line in enumerate(f)
             if index < DEVICE_LIMIT or DEVICE_LIMIT < 1]
-    dpm = DPM.Blocking(None, 'DPMJ@VIRT01')     #Do not commit with 'DPMJ@VIRT01'
+    dpm = DPM.Blocking(None)     #Do not commit with 'DPMJ@VIRT01'
     for index, device in enumerate(DEVICE_LIST):
         dpm.add_entry(index, device)
 
