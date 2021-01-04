@@ -16,6 +16,8 @@ def main():
     parser.add_argument('-f', '--device_file', help='Filename containing the list of devices. Newline delimited. No default value. type=str', type=str)
     parser.add_argument('-o', '--output_file', help='Name of the output file for the hdf5 file. Default: data.h5. type=str', default='data.h5', type=str)
     parser.add_argument('-n', '--node', help='Name of the node. type=str', default=None, type=str)
+    parser.add_argument('-v', '--version', help='Version of the input device list. type=str', default=None, type=str)
+
     #group 1
 
     #Midnight to midnight currently.
