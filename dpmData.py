@@ -5,6 +5,9 @@ import datetime
 import sys
 import pandas as pd
 import DPM
+import os
+from os import path
+import requests
 
 def main():
     parser = argparse.ArgumentParser()
@@ -39,6 +42,7 @@ def hdf_code(args):
     OUTPUT_FILE = args.output_file
     NODE = args.node
 
+
     request_string = ''     #Used later to provide input string for DPM
     
     if DURATION and (START_DATE or END_DATE):
@@ -62,17 +66,36 @@ def hdf_code(args):
 
     if NODE:
         request_string += ':' + NODE
-    
+ 
     #The input is line separated devices.
     DEVICE_LIST = []
-    with open(DEVICE_FILE) as f:
-        DEVICE_LIST = [line.rstrip() for index, line in enumerate(f)
-            if index < DEVICE_LIMIT or DEVICE_LIMIT < 1]
+    
+    if DEVICE_FILE:
+        with open(DEVICE_FILE) as f:
+            DEVICE_LIST = [line.rstrip() for line in f if line]
+    else:
+       url = 'https://github.com/fermi-controls/linac-logger-device-cleaner/releases/latest/download/linac_logger_drf_requests.txt'
+       req = requests.get(url)
+
+       if req.status_code == requests.codes.ok:
+           DEVICE_LIST = [line.rstrip() for line in req.text.split('\n') if line] # Non-blank lines
+           
+       else:
+           print('Could not fetch ' + url)
+
+    if DEVICE_LIMIT > 0:
+        DEVICE_LIST = [line for index ,line in enumerate(DEVICE_LIST)
+                       if index < DEVICE_LIMIT]
+
     dpm = DPM.Blocking(None)     #Do not commit with 'DPMJ@VIRT01'
     for index, device in enumerate(DEVICE_LIST):
         dpm.add_entry(index, device)
 
     data_done = [None] * len(DEVICE_LIST)
+
+    if path.exists(OUTPUT_FILE):
+        os.remove(OUTPUT_FILE)
+    
     hdf = pd.HDFStore(OUTPUT_FILE)
     for event_response in dpm.process(request_string):
         if hasattr(event_response, 'data'):
@@ -85,6 +108,8 @@ def hdf_code(args):
         else:
             #Want to make it status, but can't because of the bug
             data_done[event_response.tag] = False
+            
+            #TO DO: Generate an output file of devices with their statuses. Send it over to Charlie
             print(DEVICE_LIST[event_response.tag], event_response.status)
         if data_done.count(None) == 0:
             print(data_done)
