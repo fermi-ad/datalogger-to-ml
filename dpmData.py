@@ -7,7 +7,7 @@ import pandas as pd
 import DPM
 import os
 from os import path
-import requests
+import helperMethods
 
 def main():
     parser = argparse.ArgumentParser()
@@ -76,14 +76,7 @@ def hdf_code(args):
         with open(DEVICE_FILE) as f:
             DEVICE_LIST = [line.rstrip() for line in f if line]
     else:
-       url = 'https://github.com/fermi-controls/linac-logger-device-cleaner/releases/latest/download/linac_logger_drf_requests.txt'
-       req = requests.get(url)
-
-       if req.status_code == requests.codes.ok:
-           DEVICE_LIST = [line.rstrip() for line in req.text.split('\n') if line] # Non-blank lines
-           
-       else:
-           print('Could not fetch ' + url)
+        DEVICE_LIST = helperMethods.readURL(DEVICE_LIST)
 
     if DEVICE_LIMIT > 0:
         DEVICE_LIST = [line for index ,line in enumerate(DEVICE_LIST)
