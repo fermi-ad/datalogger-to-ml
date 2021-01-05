@@ -4,7 +4,7 @@ import argparse
 import datetime
 import sys
 import pandas as pd
-import DPM
+import acsys.dpm
 import os
 from os import path
 import helperMethods
@@ -25,18 +25,18 @@ def main():
         '-v', '--version', help='Version of the input device list. type=str', default=None, type=str)
 
     # group 1
-
     # Midnight to midnight currently.
     parser.add_argument("-s", "--start_date", type=lambda s: datetime.datetime.strptime(s, '%Y-%m-%d'),
                         help='Enter the start time/date. Do not use the duration tag. type=datetime.datetime', required=False)
     parser.add_argument("-e", "--end_date", type=lambda s: datetime.datetime.strptime(s, '%Y-%m-%d'),
                         help='Enter the end time/date. Do not use the duration tag. type=datetime.datetime', required=False)
+
     # group 2
     parser.add_argument(
         "-du", "--duration", help="Enter LOGGERDURATION in sec. type=str", required=False, type=str)
-    # Parse the args
-    args = parser.parse_args()
-    sys.stdout.write(str(hdf_code(args)))
+
+    # Run the program
+    hdf_code(parser.parse_args())
 
 
 def local_to_utc_ms(date):
@@ -44,6 +44,50 @@ def local_to_utc_ms(date):
     utc_datetime_obj = date.astimezone(utc_timezone)
     time_in_ms = int(utc_datetime_obj.timestamp() * 1000)
     return time_in_ms
+
+
+def create_dpm_request(device_list, hdf, request_type=None):
+    async def dpm_request(con):
+        # Setup context
+        async with acsys.dpm.DPMContext(con) as dpm:
+            # Add acquisition requests
+            for index, device in enumerate(device_list):
+                await dpm.add_entry(index, device)
+
+            # Start acquisition
+            await dpm.start(request_type)
+
+            # Track replies for each device
+            data_done = [None] * len(device_list)
+
+            # Process incoming data
+            async for event_response in dpm:
+                # This is a data response
+                if hasattr(event_response, 'data'):
+                    d = {'Timestamps': event_response.micros,
+                         'Data': event_response.data}
+                    df = pd.DataFrame(data=d)
+
+                    hdf.append(device_list[event_response.tag], df)
+
+                    if len(event_response.data) == 0:
+                        data_done[event_response.tag] = True
+
+                # Status instead of actual data.
+                else:
+                    # Want to make it status, but can't because of the bug
+                    data_done[event_response.tag] = False
+
+                    # TO DO: Generate an output file of devices with their statuses. Send it over to Charlie
+                    print(device_list[event_response.tag],
+                          event_response.status)
+
+                # If all devices have a reply, we're done
+                if data_done.count(None) == 0:
+                    print(data_done)
+                    break
+
+    return dpm_request
 
 
 def hdf_code(args):
@@ -96,34 +140,14 @@ def hdf_code(args):
         DEVICE_LIST = [line for index, line in enumerate(DEVICE_LIST)
                        if index < DEVICE_LIMIT]
 
-    dpm = DPM.Blocking(None)  # Do not commit with 'DPMJ@VIRT01'
-    for index, device in enumerate(DEVICE_LIST):
-        dpm.add_entry(index, device)
-
-    data_done = [None] * len(DEVICE_LIST)
-
     if path.exists(OUTPUT_FILE):
         os.remove(OUTPUT_FILE)
 
     hdf = pd.HDFStore(OUTPUT_FILE)
-    for event_response in dpm.process(request_string):
-        if hasattr(event_response, 'data'):
-            d = {'Timestamps': event_response.micros,
-                 'Data': event_response.data}
-            df = pd.DataFrame(data=d)
-            hdf.append(DEVICE_LIST[event_response.tag], df)
-            if len(event_response.data) == 0:
-                data_done[event_response.tag] = True
-        # Status instead of actual data.
-        else:
-            # Want to make it status, but can't because of the bug
-            data_done[event_response.tag] = False
 
-            # TO DO: Generate an output file of devices with their statuses. Send it over to Charlie
-            print(DEVICE_LIST[event_response.tag], event_response.status)
-        if data_done.count(None) == 0:
-            print(data_done)
-            break
+    get_logger_data = create_dpm_request(DEVICE_LIST, hdf, request_string)
+
+    acsys.run_client(get_logger_data)
 
     # READ THE HDF5 FILE
     for k in list(hdf.keys()):
