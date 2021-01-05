@@ -1,11 +1,17 @@
 # Data Logger to ML
+
 Scripts for requesting AD Controls data logger data and transforming those to the desired ML output format and destination.
 
-## ToDos
+## Dependencies
 
-- Using https://github.com/fermilab-accelerator-ai/workflow/ as a template, use DPM to request data logger data and transform them to hdf5 files.
-  - https://cdcvs.fnal.gov/redmine/projects/acsys-dpm/wiki/Python_DPM_API
-  - https://portal.hdfgroup.org/display/HDF5/HDF5
-- Find an optimal rate to offload data from the data logger.
-- Find an optimal rate to write to the desired ML output.
-- Explore No-SQL options.
+`pip` is used to manage dependencies. The `acsys` module is hosted on Fermilab machines and requires that a URL be specified for retrieval.
+
+`pip install -r requirements.txt --extra-index-url https://www-bd.fnal.gov/pip3`
+
+## Getting data
+
+`dpmData.py` offers `--help` documentation for specifying requests.
+
+The code below will request the previous 10 minutes of data logger data using the most recent device requests file from GitHub.
+
+`python3 dpmData.py -du 600`
