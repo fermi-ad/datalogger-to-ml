@@ -13,16 +13,16 @@ import helperMethods
 def main(raw_args=None):
     parser = argparse.ArgumentParser()
     # Add positional/optional parameters
-    parser.add_argument('-d', '--device_limit',
-                        help='Limit for number of devices. Default: 0. type=int', type=int, default=0)
-    parser.add_argument('-f', '--device_file',
-                        help='Filename containing the list of devices. Newline delimited. No default value. type=str', type=str)
-    parser.add_argument('-o', '--output_file',
-                        help='Name of the output file for the hdf5 file. Default: data.h5. type=str', default='data.h5', type=str)
-    parser.add_argument(
-        '-n', '--node', help='Name of the node. type=str', default=None, type=str)
-    parser.add_argument(
-        '-v', '--version', help='Version of the input device list. type=str', default=None, type=str)
+    parser.add_argument('-d', '--device_limit', type=int, default=0,
+                        help='Limit for number of devices. Default: 0. type=int')
+    parser.add_argument('-f', '--device_file', type=str,
+                        help='Filename containing the list of devices. Newline delimited. No default value. type=str')
+    parser.add_argument('-o', '--output_file', default='data.h5', type=str,
+                        help='Name of the output file for the hdf5 file. Default: data.h5. type=str')
+    parser.add_argument('-n', '--node', default=None, type=str,
+                        help='Name of the node. type=str')
+    parser.add_argument('-v', '--version', default=None, type=str,
+                        help='Version of the input device list. type=str')
 
     # group 1
     # Midnight to midnight currently.
