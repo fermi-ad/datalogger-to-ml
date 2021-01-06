@@ -10,7 +10,7 @@ from os import path
 import helperMethods
 
 
-def main():
+def main(raw_args=None):
     parser = argparse.ArgumentParser()
     # Add positional/optional parameters
     parser.add_argument('-d', '--device_limit',
@@ -36,7 +36,7 @@ def main():
         "-du", "--duration", help="Enter LOGGERDURATION in sec. type=str", required=False, type=str)
 
     # Run the program
-    hdf_code(parser.parse_args())
+    hdf_code(parser.parse_args(raw_args))
 
 
 def local_to_utc_ms(date):
