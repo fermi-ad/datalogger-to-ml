@@ -7,8 +7,7 @@ import pandas as pd
 import acsys.dpm
 import os
 from os import path
-import helperMethods
-
+import helper_methods
 
 def main(raw_args=None):
     parser = argparse.ArgumentParser()
@@ -134,7 +133,7 @@ def hdf_code(args):
         with open(DEVICE_FILE) as f:
             DEVICE_LIST = [line.rstrip() for line in f if line]
     else:
-        DEVICE_LIST = helperMethods.readURL(DEVICE_LIST)
+        DEVICE_LIST = helper_methods.get_latest_device_list()
 
     if DEVICE_LIMIT > 0:
         DEVICE_LIST = [line for index, line in enumerate(DEVICE_LIST)
