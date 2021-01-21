@@ -3,6 +3,7 @@
 import argparse
 import datetime
 import sys
+import warnings
 import pandas as pd
 import acsys.dpm
 import os
@@ -22,6 +23,8 @@ def main(raw_args=None):
                         help='Name of the node. type=str')
     parser.add_argument('-v', '--version', default=None, type=str,
                         help='Version of the input device list. type=str')
+    parser.add_argument('--debug', default=False, type=bool,
+                        help='Enable all messages. type=bool')
 
     # group 1
     # Midnight to midnight currently.
@@ -45,7 +48,7 @@ def local_to_utc_ms(date):
     return time_in_ms
 
 
-def create_dpm_request(device_list, hdf, request_type=None):
+def create_dpm_request(device_list, hdf, request_type=None, debug=False):
     async def dpm_request(con):
         # Setup context
         async with acsys.dpm.DPMContext(con) as dpm:
@@ -78,12 +81,14 @@ def create_dpm_request(device_list, hdf, request_type=None):
                     data_done[event_response.tag] = False
 
                     # TO DO: Generate an output file of devices with their statuses. Send it over to Charlie
-                    print(device_list[event_response.tag],
-                          event_response.status)
+                    if debug:
+                        print(device_list[event_response.tag],
+                            event_response.status)
 
                 # If all devices have a reply, we're done
                 if data_done.count(None) == 0:
-                    print(data_done)
+                    if debug:
+                        print(data_done)
                     break
 
     return dpm_request
@@ -97,6 +102,10 @@ def hdf_code(args):
     DEVICE_FILE = args.device_file
     OUTPUT_FILE = args.output_file
     NODE = args.node
+    DEBUG = args.debug
+
+    if not DEBUG:
+        warnings.simplefilter("ignore")
 
     request_string = ''  # Used later to provide input string for DPM
 
@@ -144,14 +153,15 @@ def hdf_code(args):
 
     hdf = pd.HDFStore(OUTPUT_FILE)
 
-    get_logger_data = create_dpm_request(DEVICE_LIST, hdf, request_string)
+    get_logger_data = create_dpm_request(DEVICE_LIST, hdf, request_string, debug=DEBUG)
 
     acsys.run_client(get_logger_data)
 
-    # READ THE HDF5 FILE
-    for k in list(hdf.keys()):
-        df = hdf[k]
-        print(k, ':\n', df)
+    if DEBUG:
+        # READ THE HDF5 FILE
+        for k in list(hdf.keys()):
+            df = hdf[k]
+            print(k, ':\n', df)
 
 
 if __name__ == '__main__':
