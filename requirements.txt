@@ -2,3 +2,5 @@ pandas
 tables
 acsys
 requests
+isodate
+pytz
