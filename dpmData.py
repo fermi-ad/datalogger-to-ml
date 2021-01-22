@@ -9,6 +9,7 @@ import acsys.dpm
 import os
 from os import path
 import helper_methods
+import pytz
 
 def main(raw_args=None):
     parser = argparse.ArgumentParser()
@@ -28,9 +29,9 @@ def main(raw_args=None):
 
     # group 1
     # Midnight to midnight currently.
-    parser.add_argument("-s", "--start_date", type=lambda s: datetime.datetime.strptime(s, '%Y-%m-%d'),
+    parser.add_argument("-s", "--start_date", type=lambda s: datetime.datetime.fromisoformat(s),
                         help='Enter the start time/date. Do not use the duration tag. type=datetime.datetime', required=False)
-    parser.add_argument("-e", "--end_date", type=lambda s: datetime.datetime.strptime(s, '%Y-%m-%d'),
+    parser.add_argument("-e", "--end_date", type=lambda s: datetime.datetime.fromisoformat(s),
                         help='Enter the end time/date. Do not use the duration tag. type=datetime.datetime', required=False)
 
     # group 2
@@ -42,8 +43,7 @@ def main(raw_args=None):
 
 
 def local_to_utc_ms(date):
-    utc_timezone = datetime.timezone(datetime.timedelta(0))
-    utc_datetime_obj = date.astimezone(utc_timezone)
+    utc_datetime_obj = date.astimezone(pytz.utc)
     time_in_ms = int(utc_datetime_obj.timestamp() * 1000)
     return time_in_ms
 
@@ -134,7 +134,7 @@ def hdf_code(args):
 
     if NODE:
         request_string += ':' + NODE
-
+        
     # The input is line separated devices.
     DEVICE_LIST = []
 
