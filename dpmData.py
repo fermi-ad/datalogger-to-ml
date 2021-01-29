@@ -10,6 +10,9 @@ import os
 from os import path
 import helper_methods
 import pytz
+from backports.datetime_fromisoformat import MonkeyPatch
+
+MonkeyPatch.patch_fromisoformat()
 
 def main(raw_args=None):
     parser = argparse.ArgumentParser()

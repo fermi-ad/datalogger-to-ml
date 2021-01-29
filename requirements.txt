@@ -4,3 +4,4 @@ acsys
 requests
 isodate
 pytz
+backports-datetime-fromisoformat
