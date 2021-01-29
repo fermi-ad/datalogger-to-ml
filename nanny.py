@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-'''
-## TODO: Call dpmData.py with times
-## TODO: Call dpmData.py with variable output name
-# TODO: Use argparse with sane defaults
-'''
-
 from glob import glob
 from os import path
 import requests
