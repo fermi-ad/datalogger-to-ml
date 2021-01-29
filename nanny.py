@@ -35,6 +35,8 @@ def get_latest_device_list_version():
 
 
 def get_latest_device_list():
+    global DRF_REQUESTS_LIST
+
     url = 'https://github.com/fermi-controls/linac-logger-device-cleaner/releases/latest/download/linac_logger_drf_requests.txt'
     response = requests.get(url)
 
@@ -49,6 +51,9 @@ def get_latest_device_list():
 
 
 def get_start_time():
+    global DURATION
+    global OUTPUTS_DIRECTORY
+
     # TODO: Are there existing data files at OUTPUTS_DIRECTORY
     # TODO: If not, use duration to calculate start time
     # TODO: If so, calculate the most recent data timestamp from OUTPUTS_DIRECTORY filenames
@@ -90,6 +95,9 @@ def name_output_file(start_time, duration=None):
 
 
 def main(args):
+    global DRF_REQUESTS_LIST
+    global OUTPUTS_DIRECTORY
+
     if len(args) > 1:
         OUTPUTS_DIRECTORY = path.abspath(args[1])
     # Download latest device request list if it doesn't exist
