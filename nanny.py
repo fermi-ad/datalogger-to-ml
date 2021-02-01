@@ -9,7 +9,7 @@ import sys
 import shutil
 import isodate
 import requests
-import dpmData
+import dpm_data
 
 
 def write_output(file, output):
@@ -109,7 +109,7 @@ def main(args):
     output_path_and_filename = path.join(outputs_directory, output_filename)
 
     # Being data request writing to local file
-    dpmData.main([
+    dpm_data.main([
         '-s', str(start_time),
         '-e', str(end_time),
         '-f', drf_request_list,
