@@ -10,6 +10,7 @@ import isodate
 from datetime import datetime
 from datetime import timedelta
 import sys
+import shutil
 
 DRF_REQUESTS_LIST = 'linac_logger_drf_requests.txt'
 OUTPUTS_DIRECTORY = path.abspath('.')
@@ -114,14 +115,18 @@ def main(args):
         start_time, duration)
     request_list_version = latest_version.replace('.', '_')
     output_filename = f'{iso_datetime_duration}-{request_list_version}.h5'
+    temp_path_and_filename = path.join('.', output_filename)
     output_path_and_filename = path.join(OUTPUTS_DIRECTORY, output_filename)
+
     dpmData.main([
         '-s', str(start_time),
         '-e', str(end_time),
         '-f', DRF_REQUESTS_LIST,
-        '-o', output_path_and_filename,
-        #'-d', '1'  # debugging with only one device
+        '-o', temp_path_and_filename,
+        # '-d', '1'  # debugging with only one device
     ])
+
+    shutil.move(temp_path_and_filename, output_path_and_filename)
 
 
 if __name__ == '__main__':
