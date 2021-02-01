@@ -4,15 +4,16 @@ import argparse
 import datetime
 import sys
 import warnings
-import pandas as pd
-import acsys.dpm
 import os
 from os import path
-import helper_methods
+import pandas as pd
+import acsys.dpm
 import pytz
 from backports.datetime_fromisoformat import MonkeyPatch
+import helper_methods
 
 MonkeyPatch.patch_fromisoformat()
+
 
 def main(raw_args=None):
     parser = argparse.ArgumentParser()
@@ -20,9 +21,11 @@ def main(raw_args=None):
     parser.add_argument('-d', '--device_limit', type=int, default=0,
                         help='Limit for number of devices. Default: 0. type=int')
     parser.add_argument('-f', '--device_file', type=str,
-                        help='Filename containing the list of devices. Newline delimited. No default value. type=str')
+                        help=('Filename containing the list of devices. '
+                              'Newline delimited. No default value. type=str'))
     parser.add_argument('-o', '--output_file', default='data.h5', type=str,
-                        help='Name of the output file for the hdf5 file. Default: data.h5. type=str')
+                        help=('Name of the output file for the hdf5 file. '
+                              'Default: data.h5. type=str'))
     parser.add_argument('-n', '--node', default=None, type=str,
                         help='Name of the node. type=str')
     parser.add_argument('-v', '--version', default=None, type=str,
@@ -32,10 +35,18 @@ def main(raw_args=None):
 
     # group 1
     # Midnight to midnight currently.
-    parser.add_argument("-s", "--start_date", type=lambda s: datetime.datetime.fromisoformat(s),
-                        help='Enter the start time/date. Do not use the duration tag. type=datetime.datetime', required=False)
-    parser.add_argument("-e", "--end_date", type=lambda s: datetime.datetime.fromisoformat(s),
-                        help='Enter the end time/date. Do not use the duration tag. type=datetime.datetime', required=False)
+    parser.add_argument("-s", "--start_date",
+                        type=datetime.datetime.fromisoformat,
+                        help=('Enter the start time/date. '
+                              'Do not use the duration tag. '
+                              'type=datetime.datetime'),
+                        required=False)
+    parser.add_argument("-e", "--end_date",
+                        type=datetime.datetime.fromisoformat,
+                        help=('Enter the end time/date. '
+                              'Do not use the duration tag. '
+                              'type=datetime.datetime'),
+                        required=False)
 
     # group 2
     parser.add_argument(
@@ -69,11 +80,11 @@ def create_dpm_request(device_list, hdf, request_type=None, debug=False):
             async for event_response in dpm:
                 # This is a data response
                 if hasattr(event_response, 'data'):
-                    d = {'Timestamps': event_response.micros,
-                         'Data': event_response.data}
-                    df = pd.DataFrame(data=d)
+                    dpm_data = {'Timestamps': event_response.micros,
+                                'Data': event_response.data}
+                    data_frame = pd.DataFrame(data=dpm_data)
 
-                    hdf.append(device_list[event_response.tag], df)
+                    hdf.append(device_list[event_response.tag], data_frame)
 
                     if len(event_response.data) == 0:
                         data_done[event_response.tag] = True
@@ -83,10 +94,11 @@ def create_dpm_request(device_list, hdf, request_type=None, debug=False):
                     # Want to make it status, but can't because of the bug
                     data_done[event_response.tag] = False
 
-                    # TO DO: Generate an output file of devices with their statuses. Send it over to Charlie
+                    # TODO: Generate an output file of devices with their
+                    # statuses. Send it over to Charlie
                     if debug:
                         print(device_list[event_response.tag],
-                            event_response.status)
+                              event_response.status)
 
                 # If all devices have a reply, we're done
                 if data_done.count(None) == 0:
@@ -98,73 +110,75 @@ def create_dpm_request(device_list, hdf, request_type=None, debug=False):
 
 
 def hdf_code(args):
-    START_DATE = args.start_date
-    END_DATE = args.end_date
-    DURATION = args.duration
-    DEVICE_LIMIT = args.device_limit
-    DEVICE_FILE = args.device_file
-    OUTPUT_FILE = args.output_file
-    NODE = args.node
-    DEBUG = args.debug
+    start_date = args.start_date
+    end_date = args.end_date
+    duration = args.duration
+    device_limit = args.device_limit
+    device_file = args.device_file
+    output_file = args.output_file
+    node = args.node
+    debug = args.debug
 
-    if not DEBUG:
+    if not debug:
         warnings.simplefilter("ignore")
 
     request_string = ''  # Used later to provide input string for DPM
 
-    if DURATION and (START_DATE or END_DATE):
+    if duration and (start_date or end_date):
         print("-d and -s|-e are mutually exclusive! Exiting ...")
         sys.exit(2)
 
-    elif START_DATE and END_DATE:
+    elif start_date and end_date:
         request_string = 'LOGGER:' + \
-            str(local_to_utc_ms(START_DATE)) + \
-            ':' + str(local_to_utc_ms(END_DATE))
+            str(local_to_utc_ms(start_date)) + \
+            ':' + str(local_to_utc_ms(end_date))
 
-    elif START_DATE and not END_DATE:
-        END_DATE = datetime.datetime.now()  # This is not midnight time
+    elif start_date and not end_date:
+        end_date = datetime.datetime.now()  # This is not midnight time
         request_string = 'LOGGER:' + \
-            str(local_to_utc_ms(START_DATE)) + \
-            ':' + str(local_to_utc_ms(END_DATE))
+            str(local_to_utc_ms(start_date)) + \
+            ':' + str(local_to_utc_ms(end_date))
 
-    elif END_DATE and not START_DATE:
-        print('Just entering end date is invalid. Please enter start date AND end date, or just start date.')
+    elif end_date and not start_date:
+        print(('Just entering end date is invalid. '
+               'Please enter start date AND end date, or just start date.'))
         sys.exit(2)
 
-    elif DURATION:
-        DURATION = int(DURATION) * 1000
-        request_string = 'LOGGERDURATION:' + str(DURATION)
+    elif duration:
+        duration = int(duration) * 1000
+        request_string = 'LOGGERDURATION:' + str(duration)
 
-    if NODE:
-        request_string += ':' + NODE
-        
+    if node:
+        request_string += ':' + node
+
     # The input is line separated devices.
-    DEVICE_LIST = []
+    device_list = []
 
-    if DEVICE_FILE:
-        with open(DEVICE_FILE) as f:
-            DEVICE_LIST = [line.rstrip() for line in f if line]
+    if device_file:
+        with open(device_file) as file_handle:
+            device_list = [line.rstrip() for line in file_handle if line]
     else:
-        DEVICE_LIST = helper_methods.get_latest_device_list()
+        device_list = helper_methods.get_latest_device_list()
 
-    if DEVICE_LIMIT > 0:
-        DEVICE_LIST = [line for index, line in enumerate(DEVICE_LIST)
-                       if index < DEVICE_LIMIT]
+    if device_limit > 0:
+        device_list = [line for index, line in enumerate(device_list)
+                       if index < device_limit]
 
-    if path.exists(OUTPUT_FILE):
-        os.remove(OUTPUT_FILE)
+    if path.exists(output_file):
+        os.remove(output_file)
 
-    hdf = pd.HDFStore(OUTPUT_FILE)
+    hdf = pd.HDFStore(output_file)
 
-    get_logger_data = create_dpm_request(DEVICE_LIST, hdf, request_string, debug=DEBUG)
+    get_logger_data = create_dpm_request(
+        device_list, hdf, request_string, debug=debug)
 
     acsys.run_client(get_logger_data)
 
-    if DEBUG:
+    if debug:
         # READ THE HDF5 FILE
-        for k in list(hdf.keys()):
-            df = hdf[k]
-            print(k, ':\n', df)
+        for keys in list(hdf.keys()):
+            data_frame = hdf[keys]
+            print(f'{keys}:\n{data_frame}')
 
 
 if __name__ == '__main__':
