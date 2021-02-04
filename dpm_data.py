@@ -167,18 +167,18 @@ def hdf_code(args):
     if path.exists(output_file):
         os.remove(output_file)
 
-    hdf = pd.HDFStore(output_file)
+    with pd.HDFStore(output_file) as hdf:
 
-    get_logger_data = create_dpm_request(
-        device_list, hdf, request_string, debug=debug)
+        get_logger_data = create_dpm_request(
+            device_list, hdf, request_string, debug=debug)
 
-    acsys.run_client(get_logger_data)
+        acsys.run_client(get_logger_data)
 
-    if debug:
-        # READ THE HDF5 FILE
-        for keys in list(hdf.keys()):
-            data_frame = hdf[keys]
-            print(f'{keys}:\n{data_frame}')
+        if debug:
+            # READ THE HDF5 FILE
+            for keys in list(hdf.keys()):
+                data_frame = hdf[keys]
+                print(f'{keys}:\n{data_frame}')
 
 
 if __name__ == '__main__':

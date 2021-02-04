@@ -6,14 +6,14 @@ import helper_methods
 
 
 def main(input_file, output_file):
-    hdf = pd.HDFStore(input_file)
-    output = []
+    with pd.HDFStore(input_file) as hdf:
+        output = []
 
-    for key in list(hdf.keys()):
-        df = hdf[key]
-        output.append(f'{key}:\n{df}')
+        for key in list(hdf.keys()):
+            df = hdf[key]
+            output.append(f'{key}:\n{df}')
 
-    helper_methods.write_output(output_file, output)
+        helper_methods.write_output(output_file, output)
 
 
 if __name__ == '__main__':
