@@ -6,7 +6,7 @@ import helper_methods
 
 
 def main(input_file, output_file):
-    with pd.HDFStore(input_file) as hdf:
+    with pd.HDFStore(input_file, 'r') as hdf:
         output = []
 
         for key in list(hdf.keys()):
