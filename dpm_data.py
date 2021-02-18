@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import argparse
 import datetime
+import logging
 import sys
 import warnings
 import os
@@ -13,6 +14,9 @@ from backports.datetime_fromisoformat import MonkeyPatch
 import helper_methods
 
 MonkeyPatch.patch_fromisoformat()
+
+log = logging.getLogger('acsys')
+log.setLevel(logging.DEBUG)
 
 
 def main(raw_args=None):
