@@ -92,6 +92,9 @@ def create_dpm_request(device_list, hdf, request_type=None, debug=False):
 
                     if len(event_response.data) == 0:
                         data_done[event_response.tag] = True
+                    if debug:
+                        print(device_list[event_response.tag],
+                              event_response.data)
 
                 # Status instead of actual data.
                 else:
@@ -172,7 +175,7 @@ def hdf_code(args):
         os.remove(output_file)
 
     with pd.HDFStore(output_file) as hdf:
-
+        
         get_logger_data = create_dpm_request(
             device_list, hdf, request_string, debug=debug)
 
