@@ -18,6 +18,7 @@ MonkeyPatch.patch_fromisoformat()
 log = logging.getLogger('acsys')
 log.setLevel(logging.DEBUG)
 
+logger = logging.getLogger(__name__)
 
 def main(raw_args=None):
     parser = argparse.ArgumentParser()
@@ -57,6 +58,7 @@ def main(raw_args=None):
         "-du", "--duration", help="Enter LOGGERDURATION in sec. type=str", required=False, type=str)
 
     # Run the program
+    logging.debug("Parsed all arguments. Calling hdf_code.")
     hdf_code(parser.parse_args(raw_args))
 
 
@@ -75,6 +77,7 @@ def create_dpm_request(device_list, hdf, request_type=None, debug=False):
                 await dpm.add_entry(index, device)
 
             # Start acquisition
+            logger.debug("Starting DAQ...")
             await dpm.start(request_type)
 
             # Track replies for each device
@@ -84,6 +87,9 @@ def create_dpm_request(device_list, hdf, request_type=None, debug=False):
             async for event_response in dpm:
                 # This is a data response
                 if hasattr(event_response, 'data'):
+
+                    logger.debug("Data: %s was received for Timestamp: %s" ,
+                     event_response.data , event_response.micros)
                     dpm_data = {'Timestamps': event_response.micros,
                                 'Data': event_response.data}
                     data_frame = pd.DataFrame(data=dpm_data)
@@ -91,6 +97,7 @@ def create_dpm_request(device_list, hdf, request_type=None, debug=False):
                     hdf.append(device_list[event_response.tag], data_frame)
 
                     if len(event_response.data) == 0:
+                        logger.debug("Finished collecting data for: %s" , str(event_response))
                         data_done[event_response.tag] = True
                     if debug:
                         print(device_list[event_response.tag],
@@ -100,6 +107,8 @@ def create_dpm_request(device_list, hdf, request_type=None, debug=False):
                 else:
                     # Want to make it status, but can't because of the bug
                     data_done[event_response.tag] = False
+                    logger.warning("Returned status message %s for %s" ,
+                    event_response.status, device_list[event_response.tag] )
 
                     # TODO: Generate an output file of devices with their
                     # statuses. Send it over to Charlie
@@ -113,6 +122,9 @@ def create_dpm_request(device_list, hdf, request_type=None, debug=False):
                         print(data_done)
                     break
 
+            if len(hdf.keys()) != len(device_list):
+                logger.error("Empty DAQ for certain devices. All devices from device list are not present in the HDF5.")
+
     return dpm_request
 
 
@@ -125,6 +137,10 @@ def hdf_code(args):
     output_file = args.output_file
     node = args.node
     debug = args.debug
+
+    logger.debug(
+        "start_date: %s ,end_date: %s, duration: %s, device_limit: %s ,output_file: %s ,debug: %s."
+        , start_date , end_date , duration , device_limit , output_file , debug)
 
     if not debug:
         warnings.simplefilter("ignore")
@@ -174,8 +190,7 @@ def hdf_code(args):
     if path.exists(output_file):
         os.remove(output_file)
 
-    with pd.HDFStore(output_file) as hdf:
-        
+    with pd.HDFStore(output_file) as hdf:   
         get_logger_data = create_dpm_request(
             device_list, hdf, request_string, debug=debug)
 
