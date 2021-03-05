@@ -88,8 +88,6 @@ def create_dpm_request(device_list, hdf, request_type=None, debug=False):
                 # This is a data response
                 if hasattr(event_response, 'data'):
 
-                    logger.debug("Data: %s was received for Timestamp: %s" ,
-                     event_response.data , event_response.micros)
                     dpm_data = {'Timestamps': event_response.micros,
                                 'Data': event_response.data}
                     data_frame = pd.DataFrame(data=dpm_data)
@@ -97,7 +95,6 @@ def create_dpm_request(device_list, hdf, request_type=None, debug=False):
                     hdf.append(device_list[event_response.tag], data_frame)
 
                     if len(event_response.data) == 0:
-                        logger.debug("Finished collecting data for: %s" , str(event_response))
                         data_done[event_response.tag] = True
                     if debug:
                         print(device_list[event_response.tag],
