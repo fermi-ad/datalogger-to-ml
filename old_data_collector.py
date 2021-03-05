@@ -10,6 +10,7 @@ from datetime import timedelta
 import sys
 import shutil
 import logging
+from logging.handlers import RotatingFileHandler
 import isodate
 import requests
 import pandas as pd
@@ -17,16 +18,21 @@ import dpm_data
 
 
 def init_logging(logging_level):
+    file_name = 'old_data_collector_logs.log'
     if logging_level == 'DEBUG':
-        logging.basicConfig(filename = 'old_data_collector_logs.log' ,
+        logging.basicConfig(filename = file_name ,
         format='%(asctime)s - %(levelname)s - %(name)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S',
          level=logging.DEBUG)
     elif logging_level == 'INFO':
-        logging.basicConfig(filename = 'nanny_logs.log' ,
+        logging.basicConfig(filename = file_name ,
          format='%(asctime)s - %(levelname)s - %(name)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S',
           level=logging.INFO)
 
     logger = logging.getLogger(__name__)
+    handler = RotatingFileHandler(file_name ,
+    maxBytes=1073741824, backupCount=10)   #maxBytes value = 1073741824 = 1 GB
+    logger.addHandler(handler)
+
     return logger
 
 def write_output(file, output):
@@ -166,7 +172,7 @@ def main(args):
             '-e', str(end_time),
             '-f', drf_request_list,
             '-o', temp_path_and_filename,
-            #'-d', '1',  # debugging with only one device
+            #'-d', '10',  # debugging with only one device
             #'--debug', 'True'
         ])
 
