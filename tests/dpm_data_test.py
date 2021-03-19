@@ -14,12 +14,12 @@ class TestClass:
     def test_compare_hdf_device_list(self):
         device_list = ['G:AMANDA@e,12']
         data = {
-            'Timestamps': 1612224000000,
-            'Data': 17.543346
+            'Timestamps': [1612224000000],
+            'Data': [17.543346]
         }
         data_frame = pd.DataFrame(data=data)
 
-        with pd.HDFStore() as hdf:
+        with pd.HDFStore('test.h5') as hdf:
             hdf.append(device_list[0], data_frame)
             assert dpm_data.compare_hdf_device_list(hdf, device_list)
             assert dpm_data.compare_hdf_device_list(hdf, []) is False
@@ -28,8 +28,8 @@ class TestClass:
         tests = [
             {
                 'args': [
-                    '2021-02-01 19:00:00',
-                    '2021-02-01 20:00:00',
+                    datetime.datetime.fromisoformat('2021-02-01 19:00:00'),
+                    datetime.datetime.fromisoformat('2021-02-01 20:00:00'),
                     None
                 ],
                 'expected': 'LOGGER:1612227600000:1612231200000'
