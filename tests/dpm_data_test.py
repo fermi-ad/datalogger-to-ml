@@ -29,21 +29,14 @@ class TestClass:
             assert dpm_data.compare_hdf_device_list(hdf, []) is False
 
     def test_generate_data_source(self):
-        tests = [
-            {
-                'args': [
-                    datetime.datetime.fromisoformat('2021-02-01 19:00:00'),
-                    datetime.datetime.fromisoformat('2021-02-01 20:00:00'),
-                    None
-                ],
-                'expected': 'LOGGER:1612227600000:1612231200000'
-            }
-        ]
+        input_start_time = datetime.datetime.fromisoformat('2021-02-01 19:00:00')
+        input_end_time = datetime.datetime.fromisoformat('2021-02-01 20:00:00')
+        output_start_time = dpm_data.local_to_utc_ms(input_start_time)
+        output_end_time = dpm_data.local_to_utc_ms(input_end_time)
 
-        for test in tests:
-            data_source = dpm_data.generate_data_source(
-                test['args'][0],
-                test['args'][1],
-                test['args'][2]
-            )
-            assert data_source == test['expected']
+        data_source = dpm_data.generate_data_source(
+            input_start_time,
+            input_end_time,
+            None
+        )
+        assert data_source == f'LOGGER:{output_start_time}:{output_end_time}'
