@@ -2,14 +2,18 @@
 # -*- coding: utf-8 -*-
 
 import datetime
+import math
 import pandas as pd
 import dpm_data
 
 class TestClass:
     def test_local_to_utc_ms(self):
-        local_datetime = datetime.datetime.fromisoformat('2021-02-01 18:00:00')
+        local_now = datetime.datetime.now()
+        local_now_iso = local_now.isoformat()
+        local_datetime = datetime.datetime.fromisoformat(local_now_iso)
         ms_timestamp = dpm_data.local_to_utc_ms(local_datetime)
-        assert 1612224000000 == ms_timestamp
+        local_now_ms = math.floor(local_now.timestamp() * 1000)
+        assert local_now_ms == ms_timestamp
 
     def test_compare_hdf_device_list(self):
         device_list = ['G:AMANDA@e,12']
