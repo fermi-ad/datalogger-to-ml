@@ -15,23 +15,40 @@ import requests
 import dpm_data
 
 
-def init_logging(logging_level):
-    file_name = 'nanny_logs.log'
-    if logging_level == 'DEBUG':
-        logging.basicConfig(filename = file_name ,
-        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S',
-         level=logging.DEBUG)
-    elif logging_level == 'INFO':
-        logging.basicConfig(filename = file_name ,
-         format='%(asctime)s - %(levelname)s - %(name)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S',
-          level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-    logger = logging.getLogger(__name__)
-    handler = RotatingFileHandler(file_name ,
-    maxBytes=1073741824, backupCount=10)   #maxBytes value = 1073741824 = 1 GB
+
+def config_logging(logging_level):
+    file_name = 'nanny.log'
+    level = logging.WARNING
+
+    if logging_level == 'CRITICAL':
+        level = logging.CRITICAL
+    elif logging_level == 'ERROR':
+        level = logging.ERROR
+    elif logging_level == 'WARNING':
+        level = logging.WARNING
+    elif logging_level == 'INFO':
+        level = logging.INFO
+    elif logging_level == 'DEBUG':
+        level = logging.DEBUG
+    elif logging_level == 'NOTSET':
+        level = logging.NOTSET
+
+    logging.basicConfig(
+        filename=file_name,
+        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+        datefmt='%d-%b-%y %H:%M:%S',
+        level=level
+    )
+
+    handler = RotatingFileHandler(
+        file_name,
+        maxBytes=1073741824,  # maxBytes value = 1073741824 = 1 GB
+        backupCount=10
+    )
     logger.addHandler(handler)
 
-    return logger
 
 def write_output(file, output):
     with open(file, 'w+') as file_handle:
@@ -39,38 +56,31 @@ def write_output(file, output):
             file_handle.write(line + '\n')
 
 
-def get_latest_device_list_version(logger):
+def get_latest_device_list_version():
     url = ('https://api.github.com/repos/fermi-controls/'
            'linac-logger-device-cleaner/releases/latest')
     response = requests.get(url)
 
-    if response.status_code == requests.codes.ok:
-        logger.debug("Latest device list acquired successfully.")
-        return response.json()["name"]
+    if response.status_code == requests.codes.get('ok'):
+        return response.json()['name']
 
-    logger.error('Could not fetch %s' , url)
-    #print('Could not fetch ' + url)
     return None
 
 
-def get_latest_device_list(output_path , logger):
+def get_latest_device_list():
     url = ('https://github.com/fermi-controls/linac-logger-device-cleaner/'
            'releases/latest/download/linac_logger_drf_requests.txt')
     response = requests.get(url)
 
-    if response.status_code == requests.codes.ok:
-        device_list = [line.strip()  # Trim whitespace
-                       for line in response.text.split('\n')
-                       if line]  # Remove blank lines
+    if response.status_code == requests.codes.get('ok'):
+        return [line.strip()  # Trim whitespace
+                for line in response.text.split('\n')
+                if line]  # Remove blank lines
 
-        write_output(output_path, device_list)
-        logger.debug("Wrote device list successfully to %s." , output_path)
-    else:
-        logger.error('Could not fetch %s' , url)
-        #print('Could not fetch ' + url)
+    return None
 
 
-def get_start_time(output_path , logger):
+def get_start_time(output_path):
     duration = timedelta(hours=1)
     h5_outputs = path.join(output_path, '**', '*.h5')
     # Glob allows the use of the * wildcard
@@ -87,49 +97,52 @@ def get_start_time(output_path , logger):
             start_time = isodate.parse_datetime(date_time_str)
             parsed_duration = isodate.parse_duration('P' + duration_str)
             end_time = start_time + parsed_duration
-            logger.debug("Calculated end time and parsed duration is %s %s" ,
-                 str(end_time) , str(parsed_duration))
+            logger.debug('Calculated end time: %s', end_time)
+            logger.debug('Parsed duration: %s', parsed_duration)
             return end_time, parsed_duration
         except ValueError:
-            logger.exception("Exception occurred in get_start_time. Message: %s" , ValueError)
+            logger.exception(
+                'Ignoring %s for calculating start time.',
+                files[-1]
+            )
             files.pop()
 
     # Determine start_time and duration without existing filename
     end_time = datetime.now()
     start_time = end_time - duration
-    logger.debug("Calculated end time and parsed duration is %s %s" ,
-        str(end_time) , str(parsed_duration))
+    logger.debug('Calculated end time and parsed duration is %s %s',
+                 str(end_time), str(parsed_duration))
+
     return start_time, duration
 
 
-def name_output_file(start_time, logger , duration=None ):
+def name_output_file(start_time, duration=None):
     start_time_str = isodate.datetime_isoformat(start_time)
     if duration is not None:
         duration_str = isodate.duration_isoformat(duration)
         output = (start_time_str + duration_str)\
-            .replace("-", "")\
-            .replace(":", "")
-        logger.debug("Named the output file: %s", output)
+            .replace('-', '')\
+            .replace(':', '')
         return output
 
-    output = (start_time_str).replace("-", "").replace(":", "")
-    logger.debug("Named the output file: %s", output)
+    output = (start_time_str).replace('-', '').replace(':', '')
     return output
 
 
-def create_structured_path(outputs_directory, start_time, logger):
-    # YYYYMM
-    month_directory = f'{start_time.year}{start_time.month:02d}'
-    # DD
-    day_directory = f'{start_time.day:02d}'
+def create_structured_path(outputs_directory, start_time):
+    month_directory = f'{start_time.year}{start_time.month:02d}'  # YYYYMM
+    day_directory = f'{start_time.day:02d}'  # DD
+    structured_path = path.join(
+        outputs_directory,
+        month_directory,
+        day_directory
+    )
 
-    logger.debug("Structured path is: %s" , path.join(outputs_directory,
-    month_directory, day_directory))
-    return path.join(outputs_directory, month_directory, day_directory)
+    return structured_path
 
 
 def main(args):
-    logger = init_logging('DEBUG')
+    config_logging('DEBUG')
 
     drf_request_list = 'linac_logger_drf_requests.txt'
     outputs_directory = path.abspath('.')
@@ -139,35 +152,59 @@ def main(args):
 
     # Download latest device request list if it doesn't exist
     # This means that the file must be deleted to get a newer version
-    latest_version = get_latest_device_list_version(logger)
+    latest_device_list_version = get_latest_device_list_version()
+
+    if latest_device_list_version is None:
+        logger.error('Could not fetch latest device list version.')
+    else:
+        logger.debug('Latest device list version identified successfully.')
 
     # This always overwrites the file at DRF_REQUESTS_LIST
-    get_latest_device_list(drf_request_list , logger)
+    latest_device_list = get_latest_device_list()
+
+    if latest_device_list is None:
+        logger.error('Could not fetch latest device list.')
+    else:
+        write_output(drf_request_list, latest_device_list)
+        logger.debug('Wrote device list successfully to %s.', drf_request_list)
 
     # get_start_time always returns
-    current_time = datetime.now()
-    start_time, duration = get_start_time(outputs_directory , logger)
+    start_time, duration = get_start_time(outputs_directory)
     end_time = start_time + duration
 
-    while current_time > end_time:
+    while datetime.now() > end_time:
         structured_outputs_directory = create_structured_path(
-            outputs_directory, start_time,logger)
+            outputs_directory,
+            start_time
+        )
+        logger.debug('Structured path is: %s', structured_outputs_directory)
+
         iso_datetime_duration = name_output_file(
-            start_time, logger,duration)
-        request_list_version = latest_version.replace('.', '_')
+            start_time,
+            duration
+        )
+        logger.debug('Named the output file: %s', iso_datetime_duration)
+
+        request_list_version = latest_device_list_version.replace('.', '_')
         output_filename = f'{iso_datetime_duration}-{request_list_version}.h5'
         temp_path_and_filename = path.join('.', output_filename)
         output_path_and_filename = path.join(
-            structured_outputs_directory, output_filename)
-        logger.debug("Output path and filename is: %s" , output_path_and_filename)
-        logger.debug("Calling dpm_data.main...")
+            structured_outputs_directory,
+            output_filename
+        )
+        logger.debug(
+            'Output path and filename is: %s',
+            output_path_and_filename
+        )
+
+        logger.debug('Calling dpm_data.main...')
         # Being data request writing to local file
         dpm_data.main([
             '-s', str(start_time),
             '-e', str(end_time),
             '-f', drf_request_list,
             '-o', temp_path_and_filename,
-            #'-d', '10'  # debugging with only one device
+            '--debug'
         ])
 
         # Ensure that the folders exist
@@ -178,6 +215,7 @@ def main(args):
         shutil.move(temp_path_and_filename, output_path_and_filename)
         start_time = end_time
         end_time = start_time + duration
+
 
 if __name__ == '__main__':
     main(sys.argv)
