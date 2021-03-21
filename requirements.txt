@@ -5,3 +5,6 @@ requests
 isodate
 pytz
 backports-datetime-fromisoformat
+pytest
+flake8
+pyyaml

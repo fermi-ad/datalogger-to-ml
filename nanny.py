@@ -10,8 +10,11 @@ import sys
 import shutil
 import logging
 from logging.handlers import RotatingFileHandler
+
+from requests.api import request
 import isodate
 import requests
+import yaml
 import dpm_data
 
 
@@ -56,9 +59,8 @@ def write_output(file, output):
             file_handle.write(line + '\n')
 
 
-def get_latest_device_list_version():
-    url = ('https://api.github.com/repos/fermi-controls/'
-           'linac-logger-device-cleaner/releases/latest')
+def get_latest_device_list_version(owner, repo):
+    url = f'https://api.github.com/repos/{owner}/{repo}/releases/latest'
     response = requests.get(url)
 
     if response.status_code == requests.codes.get('ok'):
@@ -67,9 +69,9 @@ def get_latest_device_list_version():
     return None
 
 
-def get_latest_device_list():
-    url = ('https://github.com/fermi-controls/linac-logger-device-cleaner/'
-           'releases/latest/download/linac_logger_drf_requests.txt')
+def get_latest_device_list(owner, repo, file_name):
+    url = (f'https://github.com/{owner}/{repo}/'
+           f'releases/latest/download/{file_name}')
     response = requests.get(url)
 
     if response.status_code == requests.codes.get('ok'):
@@ -141,32 +143,51 @@ def create_structured_path(outputs_directory, start_time):
     return structured_path
 
 
-def main(args):
-    config_logging('DEBUG')
+def load_config():
+    with open('config.yaml') as file_handle:
+        return yaml.full_load(file_handle)
 
-    drf_request_list = 'linac_logger_drf_requests.txt'
+
+def main(args):
+    config = load_config()
+    config_logging(config['logging']['level']
+        if 'logging' in config.keys() else 'DEBUG')
+
+    requests_list = 'requests.txt'
+    device_list_version = 'v0'
     outputs_directory = path.abspath('.')
 
     if len(args) > 1:
         outputs_directory = path.abspath(args[1])
 
-    # Download latest device request list if it doesn't exist
-    # This means that the file must be deleted to get a newer version
-    latest_device_list_version = get_latest_device_list_version()
+    if 'github' in config.keys():
+        # Download latest device request list if it doesn't exist
+        # This means that the file must be deleted to get a newer version
+        device_list_version = get_latest_device_list_version(
+            config['github']['owner'],
+            config['github']['repo']
+        )
 
-    if latest_device_list_version is None:
-        logger.error('Could not fetch latest device list version.')
-    else:
-        logger.debug('Latest device list version identified successfully.')
+        if device_list_version is None:
+            logger.error('Could not fetch latest device list version.')
+        else:
+            logger.debug('Latest device list version identified successfully.')
 
-    # This always overwrites the file at DRF_REQUESTS_LIST
-    latest_device_list = get_latest_device_list()
+        # This always overwrites the file at DRF_REQUESTS_LIST
+        latest_device_list = get_latest_device_list(
+            config['github']['owner'],
+            config['github']['repo'],
+            config['github']['file']
+        )
 
-    if latest_device_list is None:
-        logger.error('Could not fetch latest device list.')
-    else:
-        write_output(drf_request_list, latest_device_list)
-        logger.debug('Wrote device list successfully to %s.', drf_request_list)
+        if latest_device_list is None:
+            logger.error('Could not fetch latest device list.')
+        else:
+            write_output(requests_list, latest_device_list)
+            logger.debug('Wrote device list successfully to %s.', requests_list)
+    elif 'local' in config.keys():
+        requests_list = config['local']['file']
+        device_list_version = config['local']['file']
 
     # get_start_time always returns
     start_time, duration = get_start_time(outputs_directory)
@@ -185,7 +206,7 @@ def main(args):
         )
         logger.debug('Named the output file: %s', iso_datetime_duration)
 
-        request_list_version = latest_device_list_version.replace('.', '_')
+        request_list_version = device_list_version.replace('.', '_')
         output_filename = f'{iso_datetime_duration}-{request_list_version}.h5'
         temp_path_and_filename = path.join('.', output_filename)
         output_path_and_filename = path.join(
@@ -198,11 +219,11 @@ def main(args):
         )
 
         logger.debug('Calling dpm_data.main...')
-        # Being data request writing to local file
+        # Begin data request and writing to local file
         dpm_data.main([
             '-s', str(start_time),
             '-e', str(end_time),
-            '-f', drf_request_list,
+            '-f', requests_list,
             '-o', temp_path_and_filename,
             '--debug'
         ])
