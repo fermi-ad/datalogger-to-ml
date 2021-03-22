@@ -82,6 +82,10 @@ def create_data_processor(device_list, hdf):
                 device_list[event_response.tag]
             )
 
+        elif isinstance(event_response, acsys.dpm.DeviceInfo_reply):
+            # We don't use DeviceInfo objects so we can ignore them
+            pass
+
         else:
             logger.debug(
                 'Unknown data response type: %s',
