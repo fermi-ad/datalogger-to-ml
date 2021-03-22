@@ -71,6 +71,11 @@ def create_data_processor(device_list, hdf):
             # DPM tells us there is no more data with an empty list
             if len(event_response.data) == 0:
                 data_done[event_response.tag] = True
+                logger.debug(
+                    '%s of %s requests still processing.',
+                    data_done.count(None),
+                    len(device_list)
+                )
 
         # Status instead of actual data.
         elif isinstance(event_response, acsys.dpm.ItemStatus):
