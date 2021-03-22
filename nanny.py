@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import argparse
 from glob import glob
 from os import path
 from os import makedirs
@@ -10,8 +11,6 @@ import sys
 import shutil
 import logging
 from logging.handlers import RotatingFileHandler
-
-from requests.api import request
 import isodate
 import requests
 import yaml
@@ -144,50 +143,151 @@ def create_structured_path(outputs_directory, start_time):
 
 
 def load_config():
-    with open('config.yaml') as file_handle:
-        return yaml.full_load(file_handle)
+    try:
+        with open('config.yaml') as file_handle:
+            return yaml.full_load(file_handle)
+    except FileNotFoundError:
+        return {}
 
 
-def main(args):
-    config = load_config()
-    config_logging(config['logging']['level']
-        if 'logging' in config.keys() else 'DEBUG')
+def parse_args(raw_args=None):
+    parser = argparse.ArgumentParser()
 
-    requests_list = 'requests.txt'
-    device_list_version = 'v0'
-    outputs_directory = path.abspath('.')
+    parser.add_argument(
+        '-r'
+        '--requests_list',
+        type=str,
+        help='Input file with line separated DRF requests'
+    )
+    parser.add_argument(
+        '-v'
+        '--list_version',
+        type=str,
+        help='List version for tracking list changes'
+    )
+    parser.add_argument(
+        '-o'
+        '--output_path',
+        type=path.abspath,
+        help='Output directory for completed files to be moved to'
+    )
+    parser.add_argument(
+        '--log_level',
+        type=str,
+        help='Set the detail of messages produced in the log'
+    )
 
-    if len(args) > 1:
-        outputs_directory = path.abspath(args[1])
+    return parser.parse_args(raw_args)
 
-    if 'github' in config.keys():
-        # Download latest device request list if it doesn't exist
-        # This means that the file must be deleted to get a newer version
+
+def get_log_level(args, config):
+    log_level = None
+
+    # Determine input to use for logging configuration
+    if 'log_level' in args:
+        log_level = args.log_level
+    elif 'logging' in config.keys():
+        try:
+            log_level = config['logging']['level']
+        except KeyError:
+            logger.error('Logging config does not contain "level".')
+
+    return log_level
+
+
+def get_output_path(args, config):
+    outputs_directory = None
+
+    # Determine input to use for output configuration
+    if 'output_path' in args:
+        outputs_directory = args.output_path
+    elif 'output' in config.keys():
+        try:
+            outputs_directory = path.abspath(config['output']['path'])
+        except KeyError:
+            logger.error('Output config does not contain "path".')
+
+    return outputs_directory
+
+
+def handle_device_list_version(config):
+    device_list_version = None
+
+    # Download latest device request list if it doesn't exist
+    # This means that the file must be deleted to get a newer version
+    try:
         device_list_version = get_latest_device_list_version(
             config['github']['owner'],
             config['github']['repo']
         )
+    except KeyError:
+        logger.exception('GitHub config does not contain "owner" or "repo".')
 
-        if device_list_version is None:
-            logger.error('Could not fetch latest device list version.')
-        else:
-            logger.debug('Latest device list version identified successfully.')
+    # get_latest_device_list_version returns None if th fetch doesn't work
+    if device_list_version is None:
+        logger.error(
+            'Could not fetch latest device list version. Exiting.'
+        )
+        sys.exit('Could not fetch latest device list version from GitHub.')
+    else:
+        logger.debug('Latest device list version identified successfully.')
 
+    return device_list_version
+
+
+def handle_device_list(config, requests_list):
+    try:
         # This always overwrites the file at DRF_REQUESTS_LIST
         latest_device_list = get_latest_device_list(
             config['github']['owner'],
             config['github']['repo'],
             config['github']['file']
         )
+    except KeyError:
+        logger.error(
+            'GitHub config does not contain "owner", "repo", or "file".'
+        )
 
-        if latest_device_list is None:
-            logger.error('Could not fetch latest device list.')
-        else:
-            write_output(requests_list, latest_device_list)
-            logger.debug('Wrote device list successfully to %s.', requests_list)
+    if latest_device_list is None:
+        logger.error('Could not fetch latest device list. Exiting.')
+        sys.exit('Could not fetch latest device list from GitHub.')
+    else:
+        write_output(requests_list, latest_device_list)
+        logger.debug(
+            'Wrote device list successfully to %s.',
+            requests_list
+        )
+
+
+def get_request_list(config):
+    requests_list = 'requests.txt'
+    device_list_version = 'v0'
+
+    if 'github' in config.keys():
+        device_list_version = handle_device_list_version(config)
+        handle_device_list(config, requests_list)
     elif 'local' in config.keys():
-        requests_list = config['local']['file']
-        device_list_version = config['local']['file']
+        try:
+            requests_list = config['local']['file']
+            device_list_version = config['local']['file']
+        except KeyError:
+            logger.error('Local config does not contain "file".')
+
+    return requests_list, device_list_version
+
+
+def main(raw_args=None):
+    # Load values from config file
+    config = load_config()
+    # Load values from CLI args
+    args = parse_args(raw_args)
+
+    # Set logging level
+    config_logging(get_log_level(args, config) or 'DEBUG')
+
+    outputs_directory = get_output_path(args, config) or path.abspath('.')
+
+    requests_list, device_list_version = get_request_list(config)
 
     # get_start_time always returns
     start_time, duration = get_start_time(outputs_directory)
@@ -239,4 +339,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-    main(sys.argv)
+    main()
