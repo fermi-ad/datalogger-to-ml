@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import argparse
 import datetime
 import logging
 import sys
 import warnings
 import os
-from os import path
+from pathlib import Path
+import signal
 import pandas as pd
 import acsys.dpm
 import pytz
 from backports.datetime_fromisoformat import MonkeyPatch
-import helper_methods
+import requests
 
 MonkeyPatch.patch_fromisoformat()
 
@@ -25,13 +25,18 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
 
+def _signal_handler(signal_num, _):
+    logger.warning('Signal handler called with signal %s', signal_num)
+    sys.exit(130)
+
+
 def local_to_utc_ms(date):
     utc_datetime_obj = date.astimezone(pytz.utc)
     time_in_ms = int(utc_datetime_obj.timestamp() * 1000)
     return time_in_ms
 
 
-def compare_hdf_device_list(hdf, device_list):
+def compare_hdf_device_list(hdf, device_list, status_replies):
     hdf_keys = hdf.keys()
 
     if len(hdf_keys) != len(device_list):
@@ -45,31 +50,54 @@ def compare_hdf_device_list(hdf, device_list):
             len(device_list)
         )
 
-        for device in device_list:
-            if f'/{device}' not in hdf_keys:
-                logger.error('Device not in HDF5 output: %s', device)
+        if status_replies.count(True) < len(status_replies):
+            for index, reply in enumerate(status_replies):
+                if reply is not True:
+                    logger.error(
+                        'Status reply %s for %s',
+                        reply,
+                        device_list[index]
+                    )
+        else:
+            logger.debug('No status replies received!')
 
         return False
 
     return True
 
 
-def create_data_processor(device_list, hdf):
+def _create_data_processor(device_list, hdf):
     data_done = [None] * len(device_list)
+    data_store = {}
 
-    def run(event_response):
+    def _run(event_response):
         # This is a data response
         if isinstance(event_response, acsys.dpm.ItemData):
+            request = device_list[event_response.tag]
             dpm_data = {
                 'Timestamps': event_response.micros,
                 'Data': event_response.data
             }
             data_frame = pd.DataFrame(data=dpm_data)
 
-            hdf.append(device_list[event_response.tag], data_frame)
+            # If we think data is done and more arrives, write it to the file
+            if data_done[event_response.tag]:
+                logger.warning(
+                    'Data received after final response for %s',
+                    request
+                )
+                hdf.append(request, data_frame)
+            else:
+                if request in data_store.keys():
+                    data_store[request] = data_store[request].append(
+                        data_frame)
+                else:
+                    data_store[request] = data_frame
 
             # DPM tells us there is no more data with an empty list
             if len(event_response.data) == 0:
+                # Write data to file
+                hdf.append(request, data_store[request])
                 data_done[event_response.tag] = True
                 logger.debug(
                     '%s of %s requests still processing.',
@@ -80,7 +108,7 @@ def create_data_processor(device_list, hdf):
         # Status instead of actual data.
         elif isinstance(event_response, acsys.dpm.ItemStatus):
             # Want to make it status, but can't because of the bug
-            data_done[event_response.tag] = False
+            data_done[event_response.tag] = event_response.status
             logger.warning(
                 'Returned status message %s for %s',
                 event_response.status,
@@ -104,27 +132,32 @@ def create_data_processor(device_list, hdf):
 
         return False
 
-    return run
+    return _run
 
 
-def create_dpm_request(
+def _create_dpm_request(
     device_list,
     hdf,
-    request_type=None
+    request_type=None,
+    dpm_node=None
 ):
-    async def dpm_request(con):
+    async def _dpm_request(con):
         # Setup context
-        async with acsys.dpm.DPMContext(con) as dpm:
-            # Add acquisition requests
+        async with acsys.dpm.DPMContext(con, dpm_node=dpm_node) as dpm:
+            drf_requests = []
+
             for index, device in enumerate(device_list):
-                await dpm.add_entry(index, device)
+                drf_requests.append((index, device))
+
+            # Add acquisition requests
+            await dpm.add_entries(drf_requests)
 
             # Start acquisition
             logger.debug('Starting DAQ...')
             await dpm.start(request_type)
 
             # Track replies for each device
-            process_data = create_data_processor(device_list, hdf)
+            process_data = _create_data_processor(device_list, hdf)
             data_done = []
 
             # Process incoming data
@@ -141,9 +174,9 @@ def create_dpm_request(
                             )
                     break
 
-            compare_hdf_device_list(hdf, device_list)
+            compare_hdf_device_list(hdf, device_list, data_done)
 
-    return dpm_request
+    return _dpm_request
 
 
 def generate_data_source(start_date, end_date, duration):
@@ -178,7 +211,33 @@ def generate_data_source(start_date, end_date, duration):
     return result
 
 
-def generate_device_list(device_limit, device_file=None):
+def _write_output(path, output):
+    with open(path, 'w+') as file:
+        for line in output:
+            file.write(f'{line}\n')
+
+
+def _get_latest_device_list(output_filename=None):
+    url = ('https://github.com/fermi-controls/linac-logger-device-cleaner/'
+           'releases/latest/download/linac_logger_drf_requests.txt')
+    req = requests.get(url)
+
+    if req.status_code == requests.codes.get('ok'):
+        device_list = [line.strip()  # Trim whitespace
+                       for line in req.text.split('\n')
+                       if line]  # Remove blank lines
+
+        if output_filename:
+            _write_output(output_filename, device_list)
+
+        return device_list
+
+    print(f'Could not fetch {url}')
+
+    return None
+
+
+def _generate_device_list(device_limit, device_file=None):
     # The input is line separated devices.
     result = []
 
@@ -188,7 +247,7 @@ def generate_device_list(device_limit, device_file=None):
             result = [line.rstrip() for line in file_handle if line]
     else:
         logger.debug('Fetching latest device list')
-        result = helper_methods.get_latest_device_list()
+        result = _get_latest_device_list()
 
     if device_limit > 0:
         logger.info('Limiting device list to %s device(s)', device_limit)
@@ -198,14 +257,17 @@ def generate_device_list(device_limit, device_file=None):
     return result
 
 
-def hdf_code(args):
-    start_date = args.start_date
-    end_date = args.end_date
-    duration = args.duration
-    device_limit = args.device_limit
-    device_file = args.device_file
-    output_file = args.output_file
-    debug = args.debug
+def get_data(**kwargs):
+    signal.signal(signal.SIGINT, _signal_handler)
+
+    start_date = kwargs.get('start-date', None)
+    end_date = kwargs.get('end-date', None)
+    duration = kwargs.get('duration', None)
+    device_limit = kwargs.get('device-limit', 0)
+    device_file = kwargs.get('device-file', None)
+    output_file = kwargs.get('output-file', Path('data.h5'))
+    dpm_node = kwargs.get('dpm-node', None)
+    debug = kwargs.get('debug', False)
 
     # Silence STDOUT warnings
     warnings.simplefilter('ignore')
@@ -215,108 +277,32 @@ def hdf_code(args):
 
     logger.debug(
         (
-            'start_date: %s, end_date: %s, duration: %s, '
-            'device_file: %s, device_limit: %s, output_file: %s, debug: %s'
+            'start_date: %s, end_date: %s, duration: %s, device_file: %s, '
+            'dpm_node: %s, device_limit: %s, output_file: %s, debug: %s'
         ),
         start_date,
         end_date,
         duration,
         device_file,
+        dpm_node,
         device_limit,
         output_file,
         debug
     )
 
-    if path.exists(output_file):
+    if Path.exists(output_file):
         os.remove(output_file)
 
-    device_list = generate_device_list(device_limit, device_file)
-    logger.debug('device_list: %s', device_list)
+    device_list = _generate_device_list(device_limit, device_file)
     data_source = generate_data_source(start_date, end_date, duration)
     logger.debug('data_source: %s', data_source)
 
     with pd.HDFStore(output_file) as hdf:
-        get_logger_data = create_dpm_request(
+        get_logger_data = _create_dpm_request(
             device_list,
             hdf,
-            data_source
+            data_source,
+            dpm_node
         )
 
         acsys.run_client(get_logger_data)
-
-        if debug:
-            # READ THE HDF5 FILE
-            for keys in list(hdf.keys()):
-                data_frame = hdf[keys]
-                print(f'{keys}:\n{data_frame}')
-
-
-def main(raw_args=None):
-    parser = argparse.ArgumentParser()
-    # Add positional/optional parameters
-    parser.add_argument(
-        '-d',
-        '--device_limit',
-        type=int,
-        default=0,
-        help='Limit for number of devices.'
-    )
-    parser.add_argument(
-        '-f',
-        '--device_file',
-        type=str,
-        help=('Filename containing the list of devices. '
-              'Newline delimited.')
-    )
-    parser.add_argument(
-        '-o',
-        '--output_file',
-        default='data.h5',
-        type=str,
-        help='Name of the output file for the hdf5 file.'
-    )
-    parser.add_argument(
-        '-v',
-        '--version',
-        default=None,
-        type=str,
-        help='Version of the input device list.'
-    )
-    parser.add_argument(
-        '--debug',
-        action='store_true',
-        help='Enable all messages.'
-    )
-
-    # group 1
-    # Midnight to midnight currently.
-    parser.add_argument(
-        '-s',
-        '--start_date',
-        type=datetime.datetime.fromisoformat,
-        help=('Enter the start time/date. '
-              'Do not use the duration tag.'),
-        required=False
-    )
-    parser.add_argument(
-        '-e',
-        '--end_date',
-        type=datetime.datetime.fromisoformat,
-        help=('Enter the end time/date. '
-              'Do not use the duration tag.'),
-        required=False
-    )
-    parser.add_argument(
-        '-du',
-        '--duration',
-        help='Enter LOGGERDURATION in sec.',
-        required=False,
-        type=str
-    )
-
-    # Run the program with argparse arguments
-    hdf_code(parser.parse_args(raw_args))
-
-
-if __name__ == '__main__':
-    main()

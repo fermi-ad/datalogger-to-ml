@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import argparse
 from glob import glob
-from os import path
+from pathlib import Path
+from pathlib import PurePath
 from os import makedirs
 from datetime import datetime
 from datetime import timedelta
@@ -11,31 +11,42 @@ import sys
 import shutil
 import logging
 from logging.handlers import RotatingFileHandler
+import signal
 import isodate
 import requests
 import yaml
-import dpm_data
+from . import dpm_data
 
 
 logger = logging.getLogger(__name__)
+
+
+def signal_handler(signal_num, _):
+    logger.warning('Signal handler called with signal %s', signal_num)
+    sys.exit(130)
 
 
 def config_logging(logging_level):
     file_name = 'nanny.log'
     level = logging.WARNING
 
-    if logging_level == 'CRITICAL':
-        level = logging.CRITICAL
-    elif logging_level == 'ERROR':
-        level = logging.ERROR
-    elif logging_level == 'WARNING':
-        level = logging.WARNING
-    elif logging_level == 'INFO':
-        level = logging.INFO
-    elif logging_level == 'DEBUG':
-        level = logging.DEBUG
-    elif logging_level == 'NOTSET':
-        level = logging.NOTSET
+    if isinstance(logging_level, int):
+        level = logging_level
+    elif isinstance(logging_level, str):
+        if logging_level == 'CRITICAL':
+            level = logging.CRITICAL
+        elif logging_level == 'ERROR':
+            level = logging.ERROR
+        elif logging_level == 'WARNING':
+            level = logging.WARNING
+        elif logging_level == 'INFO':
+            level = logging.INFO
+        elif logging_level == 'DEBUG':
+            level = logging.DEBUG
+        elif logging_level == 'NOTSET':
+            level = logging.NOTSET
+    else:
+        raise TypeError
 
     logging.basicConfig(
         filename=file_name,
@@ -83,20 +94,20 @@ def get_latest_device_list(owner, repo, file_name):
 
 def get_start_time(output_path):
     duration = timedelta(hours=1)
-    h5_outputs = path.join(output_path, '**', '*.h5')
+    h5_outputs = output_path.joinpath('**', '*.h5')
     # Glob allows the use of the * wildcard
-    file_paths = glob(h5_outputs, recursive=True)
-    files = list(map(path.basename, file_paths))
+    file_paths = glob(str(h5_outputs), recursive=True)
+    files = list(map(lambda path: PurePath(path).name, file_paths))
     # Sort modifies the list in place
     files.sort()
 
     while len(files) > 0:
         try:
-            most_recent_filename = path.basename(files[-1])
+            most_recent_filename = PurePath(files[-1]).name
             date_time_duration_str = most_recent_filename.split('-')[0]
             date_time_str, duration_str = date_time_duration_str.split('P')
             start_time = isodate.parse_datetime(date_time_str)
-            parsed_duration = isodate.parse_duration('P' + duration_str)
+            parsed_duration = isodate.parse_duration(f'P{duration_str}')
             end_time = start_time + parsed_duration
             logger.debug('Calculated end time: %s', end_time)
             logger.debug('Parsed duration: %s', parsed_duration)
@@ -133,7 +144,7 @@ def name_output_file(start_time, duration=None):
 def create_structured_path(outputs_directory, start_time):
     month_directory = f'{start_time.year}{start_time.month:02d}'  # YYYYMM
     day_directory = f'{start_time.day:02d}'  # DD
-    structured_path = path.join(
+    structured_path = PurePath.joinpath(
         outputs_directory,
         month_directory,
         day_directory
@@ -150,43 +161,19 @@ def load_config():
         return {}
 
 
-def parse_args(raw_args=None):
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        '-r'
-        '--requests_list',
-        type=str,
-        help='Input file with line separated DRF requests'
-    )
-    parser.add_argument(
-        '-v'
-        '--list_version',
-        type=str,
-        help='List version for tracking list changes'
-    )
-    parser.add_argument(
-        '-o'
-        '--output_path',
-        type=path.abspath,
-        help='Output directory for completed files to be moved to'
-    )
-    parser.add_argument(
-        '--log_level',
-        type=str,
-        help='Set the detail of messages produced in the log'
-    )
-
-    return parser.parse_args(raw_args)
+def verbosity_to_log_level(verbosity=0):
+    verbosity_levels = [logging.WARN, logging.INFO, logging.DEBUG]
+    clamped_verbosity = 0 if verbosity is None else min(
+        len(verbosity_levels) - 1, verbosity)
+    return verbosity_levels[clamped_verbosity]
 
 
 def get_log_level(args, config):
-    log_level = None
+    # Try to get the keyword argument from CLI, first
+    log_level = verbosity_to_log_level(args.get('log-level', None))
 
-    # Determine input to use for logging configuration
-    if 'log_level' in args:
-        log_level = args.log_level
-    elif 'logging' in config.keys():
+    # Determine input to use for output configuration
+    if log_level is None and 'logging' in config.keys():
         try:
             log_level = config['logging']['level']
         except KeyError:
@@ -196,14 +183,13 @@ def get_log_level(args, config):
 
 
 def get_output_path(args, config):
-    outputs_directory = None
+    # Try to get the keyword argument from CLI, first
+    outputs_directory = args.get('output-path', None)
 
     # Determine input to use for output configuration
-    if 'output_path' in args:
-        outputs_directory = args.output_path
-    elif 'output' in config.keys():
+    if outputs_directory is None and 'output' in config.keys():
         try:
-            outputs_directory = path.abspath(config['output']['path'])
+            outputs_directory = Path(config['output']['path'])
         except KeyError:
             logger.error('Output config does not contain "path".')
 
@@ -259,9 +245,10 @@ def handle_device_list(config, requests_list):
         )
 
 
-def get_request_list(config):
-    requests_list = 'requests.txt'
-    device_list_version = 'v0'
+def get_request_list(args, config):
+    # Try to get the keyword argument from CLI, first
+    requests_list = args.get('requests-list', 'requests.txt')
+    device_list_version = args.get('requests-list', 'v0.1.0')
 
     if 'github' in config.keys():
         device_list_version = handle_device_list_version(config)
@@ -276,24 +263,25 @@ def get_request_list(config):
     return requests_list, device_list_version
 
 
-def main(raw_args=None):
+def get_data(**kwargs):
+    signal.signal(signal.SIGINT, signal_handler)
     # Load values from config file
     config = load_config()
-    # Load values from CLI args
-    args = parse_args(raw_args)
 
     # Set logging level
-    config_logging(get_log_level(args, config) or 'DEBUG')
+    config_logging(get_log_level(kwargs, config) or 'DEBUG')
 
-    outputs_directory = get_output_path(args, config) or path.abspath('.')
+    outputs_directory = get_output_path(kwargs, config) or Path('.')
 
-    requests_list, device_list_version = get_request_list(config)
+    requests_list, device_list_version = get_request_list(kwargs, config)
 
     # get_start_time always returns
     start_time, duration = get_start_time(outputs_directory)
     end_time = start_time + duration
 
-    while datetime.now() > end_time:
+    continue_loop = True
+
+    while datetime.now() > end_time and continue_loop:
         structured_outputs_directory = create_structured_path(
             outputs_directory,
             start_time
@@ -308,11 +296,10 @@ def main(raw_args=None):
 
         request_list_version = device_list_version.replace('.', '_')
         output_filename = f'{iso_datetime_duration}-{request_list_version}.h5'
-        temp_path_and_filename = path.join('.', output_filename)
-        output_path_and_filename = path.join(
-            structured_outputs_directory,
-            output_filename
-        )
+        temp_path_and_filename = PurePath('.').joinpath(output_filename)
+        output_path_and_filename = PurePath(
+            structured_outputs_directory
+        ).joinpath(output_filename)
         logger.debug(
             'Output path and filename is: %s',
             output_path_and_filename
@@ -320,16 +307,16 @@ def main(raw_args=None):
 
         logger.debug('Calling dpm_data.main...')
         # Begin data request and writing to local file
-        dpm_data.main([
-            '-s', str(start_time),
-            '-e', str(end_time),
-            '-f', requests_list,
-            '-o', temp_path_and_filename,
-            '--debug'
-        ])
+        dpm_data.get_data(
+            start_date=start_time,
+            end_date=end_time,
+            device_file=requests_list,
+            output_file=temp_path_and_filename,
+            debug=True
+        )
 
         # Ensure that the folders exist
-        if not path.exists(structured_outputs_directory):
+        if not Path.exists(structured_outputs_directory):
             makedirs(structured_outputs_directory, exist_ok=True)
 
         # Move local closed file to final destination
@@ -337,6 +324,5 @@ def main(raw_args=None):
         start_time = end_time
         end_time = start_time + duration
 
-
-if __name__ == '__main__':
-    main()
+        # Check if should continue
+        continue_loop = not kwargs.get('run-once')

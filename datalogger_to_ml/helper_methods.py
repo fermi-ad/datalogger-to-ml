@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import requests
 
 
-def write_output(file, output):
-    with open(file, 'w+') as f:
+def write_output(path, output):
+    with open(path, 'w+') as file:
         for line in output:
-            f.write(line + '\n')
+            file.write(f'{line}\n')
 
 
 def get_latest_device_list(output_filename=None):
-    url = 'https://github.com/fermi-controls/linac-logger-device-cleaner/releases/latest/download/linac_logger_drf_requests.txt'
+    url = ('https://github.com/fermi-controls/linac-logger-device-cleaner/'
+           'releases/latest/download/linac_logger_drf_requests.txt')
     req = requests.get(url)
 
-    if req.status_code == requests.codes.ok:
+    if req.status_code == requests.codes.get('ok'):
         device_list = [line.strip()  # Trim whitespace
                        for line in req.text.split('\n')
                        if line]  # Remove blank lines
@@ -21,7 +24,7 @@ def get_latest_device_list(output_filename=None):
             write_output(output_filename, device_list)
 
         return device_list
-    else:
-        print('Could not fetch ' + url)
+
+    print(f'Could not fetch {url}')
 
     return None
