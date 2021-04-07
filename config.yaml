@@ -1,8 +1,0 @@
----
-  github:
-    owner: fermi-controls
-    repo: linac-logger-device-cleaner
-    file: linac_logger_drf_requests.txt
-  logging:
-    level: DEBUG
- 
