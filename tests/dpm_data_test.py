@@ -4,7 +4,7 @@
 import datetime
 import math
 import pandas as pd
-import dpm_data
+from datalogger_to_ml import dpm_data
 
 class TestClass:
     def test_local_to_utc_ms(self):
@@ -17,6 +17,7 @@ class TestClass:
 
     def test_compare_hdf_device_list(self):
         device_list = ['G:AMANDA@e,12']
+        status_replies = [True]
         data = {
             'Timestamps': [1612224000000],
             'Data': [17.543346]
@@ -25,8 +26,8 @@ class TestClass:
 
         with pd.HDFStore('test.h5') as hdf:
             hdf.append(device_list[0], data_frame)
-            assert dpm_data.compare_hdf_device_list(hdf, device_list)
-            assert dpm_data.compare_hdf_device_list(hdf, []) is False
+            assert dpm_data.compare_hdf_device_list(hdf, device_list, status_replies)
+            assert dpm_data.compare_hdf_device_list(hdf, [], status_replies) is False
 
     def test_generate_data_source(self):
         input_start_time = datetime.datetime.fromisoformat('2021-02-01 19:00:00')
