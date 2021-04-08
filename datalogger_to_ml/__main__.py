@@ -73,7 +73,7 @@ def main():
     nanny_parser.add_argument(
         '-o',
         '--output-path',
-        type=Path.resolve,
+        type=Path,
         help='Output directory for completed files to be moved to'
     )
     nanny_parser.add_argument(
