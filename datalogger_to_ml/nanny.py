@@ -183,7 +183,7 @@ def get_log_level(args, config):
 
 def get_output_path(args, config):
     # Try to get the keyword argument from CLI, first
-    outputs_directory = args.get('output-path', None)
+    outputs_directory = args.get('output-path', args.get('output_path', None))
 
     # Determine input to use for output configuration
     if outputs_directory is None and 'output' in config.keys():
@@ -246,8 +246,14 @@ def handle_device_list(config, requests_list):
 
 def get_request_list(args, config):
     # Try to get the keyword argument from CLI, first
-    requests_list = args.get('requests-list', 'requests.txt')
-    device_list_version = args.get('requests-list', 'v0.1.0')
+    requests_list = args.get(
+        'requests-list',
+        args.get('requests_list', 'requests.txt')
+    )
+    device_list_version = args.get(
+        'list-version',
+        args.get('list_version', 'v0.1.0')
+    )
 
     if 'github' in config.keys():
         device_list_version = handle_device_list_version(config)
@@ -332,4 +338,4 @@ def get_data(**kwargs):
         end_time = start_time + duration
 
         # Check if should continue
-        continue_loop = not kwargs.get('run-once')
+        continue_loop = not kwargs.get('run-once', kwargs.get('run_once'))
