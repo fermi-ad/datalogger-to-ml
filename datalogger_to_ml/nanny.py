@@ -113,7 +113,7 @@ def get_start_time(output_path):
             logger.debug('Parsed duration: %s', parsed_duration)
             return end_time, parsed_duration
         except ValueError:
-            logger.exception(
+            logger.debug(
                 'Ignoring %s for calculating start time.',
                 files[-1]
             )
