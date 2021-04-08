@@ -144,8 +144,7 @@ def name_output_file(start_time, duration=None):
 def create_structured_path(outputs_directory, start_time):
     month_directory = f'{start_time.year}{start_time.month:02d}'  # YYYYMM
     day_directory = f'{start_time.day:02d}'  # DD
-    structured_path = PurePath.joinpath(
-        outputs_directory,
+    structured_path = Path(outputs_directory).joinpath(
         month_directory,
         day_directory
     )
@@ -296,8 +295,8 @@ def get_data(**kwargs):
 
         request_list_version = device_list_version.replace('.', '_')
         output_filename = f'{iso_datetime_duration}-{request_list_version}.h5'
-        temp_path_and_filename = PurePath('.').joinpath(output_filename)
-        output_path_and_filename = PurePath(
+        temp_path_and_filename = Path('.').joinpath(output_filename)
+        output_path_and_filename = Path(
             structured_outputs_directory
         ).joinpath(output_filename)
         logger.debug(
@@ -316,7 +315,7 @@ def get_data(**kwargs):
         )
 
         # Ensure that the folders exist
-        if not Path.exists(structured_outputs_directory):
+        if not structured_outputs_directory.exists():
             makedirs(structured_outputs_directory, exist_ok=True)
 
         # Move local closed file to final destination

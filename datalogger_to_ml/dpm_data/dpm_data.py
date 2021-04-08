@@ -297,7 +297,7 @@ def get_data(**kwargs):
         debug
     )
 
-    if Path.exists(output_file):
+    if output_file.exists():
         os.remove(output_file)
 
     device_list = _generate_device_list(device_limit, device_file)
