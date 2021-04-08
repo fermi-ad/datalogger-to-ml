@@ -304,7 +304,15 @@ def get_data(**kwargs):
             output_path_and_filename
         )
 
-        logger.debug('Calling dpm_data.main...')
+        logger.info('Calling dpm_data.main...')
+        logger.debug(
+            ('start_date=%s, end_date=%s, device_file=%s, '
+            'output_file=%s, debug=True'),
+            start_time,
+            end_time,
+            requests_list,
+            temp_path_and_filename
+        )
         # Begin data request and writing to local file
         dpm_data.get_data(
             start_date=start_time,
