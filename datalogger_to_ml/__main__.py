@@ -37,7 +37,7 @@ def main():
         action='version',
         version=f'%(prog)s {get_version()}'
     )
-    parser.add_argument('--verbose', '-v', action='count', default=0)
+    parser.add_argument('-v', '--verbose', action='count', default=0)
 
     # sub-commands
     subparsers = parser.add_subparsers(help='sub-command help')
