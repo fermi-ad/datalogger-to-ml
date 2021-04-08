@@ -17,7 +17,6 @@ isodate = '^0.6.0'
 pytz = '^2021.1'
 backports-datetime-fromisoformat = '^1.0.0'
 PyYAML = '^5.4.1'
-importlib = '^1.0.4'
 acsys = '^0.9.11'
 
 [tool.poetry.dev-dependencies]

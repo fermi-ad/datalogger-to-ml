@@ -26,11 +26,7 @@ def get_version():
     return __version__
 
 
-def main(first_arg):
-    print(first_arg)
-
-
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(
         argument_default=argparse.SUPPRESS,
         description='Process some integers.',
@@ -116,3 +112,7 @@ if __name__ == '__main__':
     }
     # Pass keyword arguments to the relevant function
     args.func(**kw_args)
+
+
+if __name__ == '__main__':
+    main()

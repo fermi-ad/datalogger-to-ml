@@ -112,14 +112,6 @@ optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
 
 [[package]]
-name = "importlib"
-version = "1.0.4"
-description = "Backport of importlib.import_module() from Python 2.7"
-category = "main"
-optional = false
-python-versions = "*"
-
-[[package]]
 name = "importlib-metadata"
 version = "3.10.0"
 description = "Read metadata from Python packages"
