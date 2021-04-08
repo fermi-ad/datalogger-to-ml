@@ -264,13 +264,16 @@ def _generate_device_list(device_limit, device_file=None):
 def get_data(**kwargs):
     signal.signal(signal.SIGINT, _signal_handler)
 
-    start_date = kwargs.get('start-date', None)
-    end_date = kwargs.get('end-date', None)
+    start_date = kwargs.get('start-date', kwargs.get('start_date', None))
+    end_date = kwargs.get('end-date', kwargs.get('end_date', None))
     duration = kwargs.get('duration', None)
     device_limit = kwargs.get('device-limit', 0)
-    device_file = kwargs.get('device-file', None)
-    output_file = kwargs.get('output-file', Path('data.h5'))
-    dpm_node = kwargs.get('dpm-node', None)
+    device_file = kwargs.get('device-file', kwargs.get('device_file', None))
+    output_file = kwargs.get(
+        'output-file',
+        kwargs.get('output_file', Path('data.h5'))
+    )
+    dpm_node = kwargs.get('dpm-node', kwargs.get('dpm_node', None))
     debug = kwargs.get('debug', False)
 
     # Silence STDOUT warnings
