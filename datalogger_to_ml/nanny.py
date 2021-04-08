@@ -122,8 +122,8 @@ def get_start_time(output_path):
     # Determine start_time and duration without existing filename
     end_time = datetime.now()
     start_time = end_time - duration
-    logger.debug('Calculated end time and parsed duration is %s %s',
-                 str(end_time), str(parsed_duration))
+    logger.debug('End time and duration are %s %s',
+                 end_time, duration)
 
     return start_time, duration
 
