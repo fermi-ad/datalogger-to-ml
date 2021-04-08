@@ -5,6 +5,9 @@ description = 'Command line tool for extracting and saving Fermi control system 
 authors = ['Beau Harrison <beau@fnal.gov>']
 readme = 'README.md'
 
+[tool.poetry.scripts]
+datalogger-to-ml = 'datalogger_to_ml.__main__:main'
+
 [[tool.poetry.source]]
 name = 'fermi'
 url = 'https://www-bd.fnal.gov/pip3/'
