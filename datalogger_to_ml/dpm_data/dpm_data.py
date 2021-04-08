@@ -206,7 +206,11 @@ def generate_data_source(start_date, end_date, duration):
 
     elif duration:
         duration = int(duration) * 1000
-        result = 'LOGGERDURATION: {duration}'
+        result = f'LOGGERDURATION:{duration}'
+
+    else:
+        duration = 3600 * 1000
+        result = f'LOGGERDURATION:{duration}'
 
     return result
 
