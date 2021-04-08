@@ -169,7 +169,7 @@ def verbosity_to_log_level(verbosity=0):
 
 def get_log_level(args, config):
     # Try to get the keyword argument from CLI, first
-    log_level = verbosity_to_log_level(args.get('log-level', None))
+    log_level = verbosity_to_log_level(args.get('verbose', 0))
 
     # Determine input to use for output configuration
     if log_level is None and 'logging' in config.keys():
