@@ -261,7 +261,7 @@ def get_request_list(args, config):
     elif 'local' in config.keys():
         try:
             requests_list = config['local']['file']
-            device_list_version = config['local']['file']
+            device_list_version = config['local']['version']
         except KeyError:
             logger.error('Local config does not contain "file".')
 
