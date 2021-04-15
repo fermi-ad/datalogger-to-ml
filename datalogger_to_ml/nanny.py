@@ -263,7 +263,7 @@ def get_request_list(args, config):
             requests_list = config['local']['file']
             device_list_version = config['local']['version']
         except KeyError:
-            logger.error('Local config does not contain "file".')
+            logger.info('Local config does not contain "file" or "version".')
 
     return requests_list, device_list_version
 
