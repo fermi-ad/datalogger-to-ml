@@ -92,8 +92,21 @@ def get_latest_device_list(owner, repo, file_name):
     return None
 
 
-def get_start_time(output_path):
+def parse_iso(date_time_duration_str):
+    date_time_str, duration_str = date_time_duration_str.split('P')
+    start_time = isodate.parse_datetime(date_time_str)
+    duration = isodate.parse_duration(f'P{duration_str}')
+
+    return start_time, duration
+
+
+def get_start_time(output_path, config):
     duration = timedelta(hours=1)
+    # Overwrite the default duration if it's set in the config
+    if 'duration' in config.keys():
+        str_duration = config['duration']
+        duration = isodate.parse_duration(f'P{str_duration}')
+
     h5_outputs = output_path.joinpath('**', '*.h5')
     # Glob allows the use of the * wildcard
     file_paths = glob(str(h5_outputs), recursive=True)
@@ -105,9 +118,7 @@ def get_start_time(output_path):
         try:
             most_recent_filename = PurePath(files[-1]).name
             date_time_duration_str = most_recent_filename.split('-')[0]
-            date_time_str, duration_str = date_time_duration_str.split('P')
-            start_time = isodate.parse_datetime(date_time_str)
-            parsed_duration = isodate.parse_duration(f'P{duration_str}')
+            start_time, parsed_duration = parse_iso(date_time_duration_str)
             end_time = start_time + parsed_duration
             logger.debug('Calculated end time: %s', end_time)
             logger.debug('Parsed duration: %s', parsed_duration)
@@ -122,6 +133,11 @@ def get_start_time(output_path):
     # Determine start_time and duration without existing filename
     end_time = datetime.now()
     start_time = end_time - duration
+    # Overwrite the default start_time and duration if it's set in the config
+    if 'start' in config.keys():
+        start_time, parsed_duration = parse_iso(config['start'])
+        end_time = start_time + parsed_duration
+
     logger.debug('End time and duration are %s %s',
                  end_time, duration)
 
@@ -281,7 +297,7 @@ def get_data(**kwargs):
     requests_list, device_list_version = get_request_list(kwargs, config)
 
     # get_start_time always returns
-    start_time, duration = get_start_time(outputs_directory)
+    start_time, duration = get_start_time(outputs_directory, config)
     end_time = start_time + duration
 
     continue_loop = True
@@ -313,7 +329,7 @@ def get_data(**kwargs):
         logger.info('Calling dpm_data.main...')
         logger.debug(
             ('start_date=%s, end_date=%s, device_file=%s, '
-            'output_file=%s, debug=True'),
+             'output_file=%s, debug=True'),
             start_time,
             end_time,
             requests_list,

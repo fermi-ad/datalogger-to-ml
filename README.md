@@ -30,6 +30,8 @@ Here's an example config file that uses GitHub to host the requests list:
     owner: fermi-controls
     repo: linac-logger-device-cleaner
     file: linac_logger_drf_requests.txt
+  start: 20200101T000000
+  duration: T1H
   output:
     path: .
   logging:
@@ -44,12 +46,16 @@ Here's an example config file that uses a local requests list:
   local:
     file: custom_requests.txt
     version: 1.0.0
+  start: 20200101T000000
+  duration: T1H
   output:
     path: .
   logging:
     level: DEBUG
 
 ```
+
+When using the config file, a start datetime and duration can be specified. The default duration is one hour and the default start time is one duration ago.
 
 #### CLI arguments
 
