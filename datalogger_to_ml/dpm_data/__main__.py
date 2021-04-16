@@ -91,4 +91,13 @@ if __name__ == '__main__':
     )
 
     # Run the program with argparse arguments
-    dpm_data.get_data(**vars(parser.parse_args()))
+    args = parser.parse_args()
+    # Filter None values from Namespace
+    # `argument_default=argparse.SUPPRESS` above doesn't work
+    kw_args = {
+        key: value
+        for (key, value) in vars(args).items()
+        if value is not None
+    }
+    # Pass keyword arguments 
+    dpm_data.get_data(**kw_args)
