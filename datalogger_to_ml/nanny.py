@@ -101,12 +101,6 @@ def parse_iso(date_time_duration_str):
 
 
 def get_start_time(output_path, config):
-    duration = timedelta(hours=1)
-    # Overwrite the default duration if it's set in the config
-    if 'duration' in config.keys():
-        str_duration = config['duration']
-        duration = isodate.parse_duration(f'P{str_duration}')
-
     h5_outputs = output_path.joinpath('**', '*.h5')
     # Glob allows the use of the * wildcard
     file_paths = glob(str(h5_outputs), recursive=True)
@@ -130,13 +124,18 @@ def get_start_time(output_path, config):
             )
             files.pop()
 
-    # Determine start_time and duration without existing filename
+    duration = timedelta(hours=1)
+    # Overwrite the default duration if it's set in the config
+    if 'duration' in config.keys():
+        str_duration = config['duration']
+        duration = isodate.parse_duration(f'P{str_duration}')
+
     end_time = datetime.now()
+    # Determine start_time and duration without existing filename
     start_time = end_time - duration
     # Overwrite the default start_time and duration if it's set in the config
     if 'start' in config.keys():
-        start_time, parsed_duration = parse_iso(config['start'])
-        end_time = start_time + parsed_duration
+        start_time = isodate.parse_datetime(config['start'])
 
     logger.debug('End time and duration are %s %s',
                  end_time, duration)
