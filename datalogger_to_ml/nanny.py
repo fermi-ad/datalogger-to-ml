@@ -100,29 +100,32 @@ def parse_iso(date_time_duration_str):
     return start_time, duration
 
 
-def get_start_time(output_path, config):
-    h5_outputs = output_path.joinpath('**', '*.h5')
-    # Glob allows the use of the * wildcard
-    file_paths = glob(str(h5_outputs), recursive=True)
-    files = list(map(lambda path: PurePath(path).name, file_paths))
-    # Sort modifies the list in place
-    files.sort()
+def get_start_time(output_path, args, config):
+    cli_start_time = args.get('start_time', None)
 
-    while len(files) > 0:
-        try:
-            most_recent_filename = PurePath(files[-1]).name
-            date_time_duration_str = most_recent_filename.split('-')[0]
-            start_time, parsed_duration = parse_iso(date_time_duration_str)
-            end_time = start_time + parsed_duration
-            logger.debug('Calculated end time: %s', end_time)
-            logger.debug('Parsed duration: %s', parsed_duration)
-            return end_time, parsed_duration
-        except ValueError:
-            logger.debug(
-                'Ignoring %s for calculating start time.',
-                files[-1]
-            )
-            files.pop()
+    if cli_start_time is None:
+        h5_outputs = output_path.joinpath('**', '*.h5')
+        # Glob allows the use of the * wildcard
+        file_paths = glob(str(h5_outputs), recursive=True)
+        files = list(map(lambda path: PurePath(path).name, file_paths))
+        # Sort modifies the list in place
+        files.sort()
+
+        while len(files) > 0:
+            try:
+                most_recent_filename = PurePath(files[-1]).name
+                date_time_duration_str = most_recent_filename.split('-')[0]
+                start_time, parsed_duration = parse_iso(date_time_duration_str)
+                end_time = start_time + parsed_duration
+                logger.debug('Calculated end time: %s', end_time)
+                logger.debug('Parsed duration: %s', parsed_duration)
+                return end_time, parsed_duration
+            except ValueError:
+                logger.debug(
+                    'Ignoring %s for calculating start time.',
+                    files[-1]
+                )
+                files.pop()
 
     duration = timedelta(hours=1)
     # Overwrite the default duration if it's set in the config
@@ -131,11 +134,15 @@ def get_start_time(output_path, config):
         duration = isodate.parse_duration(f'P{str_duration}')
 
     end_time = datetime.now()
-    # Determine start_time and duration without existing filename
-    start_time = end_time - duration
-    # Overwrite the default start_time and duration if it's set in the config
-    if 'start' in config.keys():
-        start_time = isodate.parse_datetime(config['start'])
+
+    if cli_start_time is None:
+        # Determine start_time and duration without existing filename
+        start_time = end_time - duration
+        # Overwrite the default start_time and duration if in the config
+        if 'start' in config.keys():
+            start_time = isodate.parse_datetime(config['start'])
+    else:
+        start_time = cli_start_time
 
     logger.debug('End time and duration are %s %s',
                  end_time, duration)
@@ -296,7 +303,7 @@ def get_data(**kwargs):
     requests_list, device_list_version = get_request_list(kwargs, config)
 
     # get_start_time always returns
-    start_time, duration = get_start_time(outputs_directory, config)
+    start_time, duration = get_start_time(outputs_directory, kwargs, config)
     end_time = start_time + duration
 
     continue_loop = True

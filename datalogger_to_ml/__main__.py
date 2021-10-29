@@ -3,6 +3,7 @@
 
 import argparse
 from pathlib import Path
+import isodate
 from . import h5_dump
 from . import nanny
 from . import h5_validator
@@ -80,6 +81,11 @@ def main():
         '--run-once',
         action='store_true',
         help='Generate only one file before exiting.'
+    )
+    nanny_parser.add_argument(
+        '--start-time',
+        type=isodate.parse_datetime,
+        help='Date and time to start data acquisition.'
     )
     dump_parser.add_argument(
         '-i',
