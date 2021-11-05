@@ -1,6 +1,6 @@
 [tool.poetry]
 name = 'datalogger-to-ml'
-version = '1.2.0'
+version = '1.2.1'
 description = 'Command line tool for extracting and saving Fermi control system historical data.'
 authors = ['Beau Harrison <beau@fnal.gov>']
 readme = 'README.md'
