@@ -16,7 +16,7 @@ def validate(**kwargs):
     if len(files) > 0:
         for file in files:
             try:
-                with pd.HDFStore(file) as hdf:
+                with pd.HDFStore(file, mode='r') as hdf:
                     if len(hdf) > 0:
                         print(f'{file} was successfully read')
                     else:
