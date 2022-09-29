@@ -1,9 +1,9 @@
 build:
-	poetry build
-	poetry export --output=requirements.txt
+	python -m poetry build
+	python -m poetry export --output=requirements.txt
 
 install:
-	poetry install
+	python -m poetry install
 
 deploy: build
 	scp dist/* chablis:/usr/local/www/data/pip3/datalogger-to-ml/
