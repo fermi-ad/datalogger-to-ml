@@ -64,7 +64,7 @@ def config_logging(logging_level):
 
 
 def write_output(file, output):
-    with open(file, 'w+') as file_handle:
+    with open(file, 'w+', encoding='utf8') as file_handle:
         for line in output:
             file_handle.write(line + '\n')
 
@@ -176,7 +176,7 @@ def create_structured_path(outputs_directory, start_time):
 
 def load_config():
     try:
-        with open('config.yaml') as file_handle:
+        with open('config.yaml', encoding='utf8') as file_handle:
             return yaml.full_load(file_handle)
     except FileNotFoundError:
         return {}
