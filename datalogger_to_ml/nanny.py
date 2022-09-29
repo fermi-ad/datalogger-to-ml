@@ -100,6 +100,35 @@ def parse_iso(date_time_duration_str):
     return start_time, duration
 
 
+def get_start_time_config(args: dict[str, Any], config: Any | dict) -> datetime | None:
+    # Try to get the keyword argument from CLI, first
+    start_time = args.get('start-time', args.get('start_time', None))
+
+    # Determine input to use for output configuration
+    if start_time is None and 'start' in config.keys():
+        try:
+            start_time = config['start']
+        except KeyError:
+            logger.debug('Config does not contain "start".')
+            return None
+
+    return parse_iso(start_time)
+
+
+def get_duration_config(args: dict[str, Any], config: Any | dict) -> isodate.Duration | None:
+    # Try to get the keyword argument from CLI, first
+    duration = args.get('duration', None)
+
+    # Determine input to use for output configuration
+    if duration is None and 'duration' in config.keys():
+        try:
+            duration = config["duration"]
+        except KeyError:
+            logger.debug('Config does not contain "duration".')
+            return None
+
+    return isodate.parse_duration(f'P{duration}')
+
 def get_start_time(output_path, args, config):
     cli_start_time = args.get('start_time', None)
 
