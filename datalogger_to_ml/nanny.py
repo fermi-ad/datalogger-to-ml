@@ -92,8 +92,15 @@ def get_latest_device_list(owner, repo, file_name):
     return None
 
 
-def parse_iso(date_time_duration_str):
-    date_time_str, duration_str = date_time_duration_str.split('P')
+def parse_iso(date_time_duration_str) -> tuple[datetime, isodate.Duration]:
+    try:
+        date_time_str, duration_str = date_time_duration_str.split('P')
+    except ValueError:
+        logger.warning(('No duration defined in iso string. '
+                        'Using the default duration.'))
+        date_time_str = date_time_duration_str
+        duration_str = 'T1H'
+
     start_time = isodate.parse_datetime(date_time_str)
     duration = isodate.parse_duration(f'P{duration_str}')
 
