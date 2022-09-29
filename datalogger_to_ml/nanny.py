@@ -6,12 +6,12 @@ from pathlib import Path
 from pathlib import PurePath
 from os import makedirs
 from datetime import datetime
-from datetime import timedelta
 import sys
 import shutil
 import logging
 from logging.handlers import RotatingFileHandler
 import signal
+from typing import Any
 import isodate
 import requests
 import yaml
@@ -136,52 +136,64 @@ def get_duration_config(args: dict[str, Any], config: Any | dict) -> isodate.Dur
 
     return isodate.parse_duration(f'P{duration}')
 
+# Paths for `get_start_time`:
+#     No time constraints with no files
+#     No time constraints with files
+#     Time constraints with no files
+#     Time constraints with files
+
+
 def get_start_time(output_path, args, config):
-    cli_start_time = args.get('start_time', None)
+    start_time = get_start_time_config(args, config)
+    duration = get_duration_config(args, config)
 
-    if cli_start_time is None:
-        h5_outputs = output_path.joinpath('**', '*.h5')
-        # Glob allows the use of the * wildcard
-        file_paths = glob(str(h5_outputs), recursive=True)
-        files = list(map(lambda path: PurePath(path).name, file_paths))
-        # Sort modifies the list in place
-        files.sort()
+    h5_outputs = output_path.joinpath('**', '*.h5')
+    # Glob allows the use of the * wildcard
+    file_paths = glob(str(h5_outputs), recursive=True)
+    files = list(map(lambda path: PurePath(path).name, file_paths))
+    # Sort modifies the list in place
+    files.sort()
 
-        while len(files) > 0:
-            try:
-                most_recent_filename = PurePath(files[-1]).name
-                date_time_duration_str = most_recent_filename.split('-')[0]
-                start_time, parsed_duration = parse_iso(date_time_duration_str)
-                end_time = start_time + parsed_duration
-                logger.debug('Calculated end time: %s', end_time)
-                logger.debug('Parsed duration: %s', parsed_duration)
-                return end_time, parsed_duration
-            except ValueError:
-                logger.debug(
-                    'Ignoring %s for calculating start time.',
-                    files[-1]
-                )
-                files.pop()
+    while len(files) > 0:
+        try:
+            most_recent_filename = PurePath(files[-1]).name
+            date_time_duration_str = most_recent_filename.split('-')[0]
+            file_start_time, file_duration = parse_iso(date_time_duration_str)
+            logger.debug('Parsed duration: %s', file_duration)
+            break
+        except ValueError:
+            logger.debug(
+                'Ignoring %s for calculating start time.',
+                files[-1]
+            )
+            files.pop()
 
-    duration = timedelta(hours=1)
-    # Overwrite the default duration if it's set in the config
-    if 'duration' in config.keys():
-        str_duration = config['duration']
-        duration = isodate.parse_duration(f'P{str_duration}')
+    try:
+        if file_start_time > start_time:
+            start_time = file_start_time
+    except NameError:
+        if start_time is None:
+            logger.error('Cannot determine start time.')
+            raise
+        else:
+            logger.debug('`file_start_time` is undefined')
+    except TypeError:
+        start_time = file_start_time
 
-    end_time = datetime.now()
+    # This means the config didn't have a duration specified.
+    if duration is None:
+        # First try to get duration from file
+        try:
+            duration = file_duration
+        except NameError:
+            logger.debug('`file_duration` is undefined')
+            # Otherwise, get the duration from the `start_time` or default.
+            _, duration = parse_iso(start_time)
 
-    if cli_start_time is None:
-        # Determine start_time and duration without existing filename
-        start_time = end_time - duration
-        # Overwrite the default start_time and duration if in the config
-        if 'start' in config.keys():
-            start_time = isodate.parse_datetime(config['start'])
-    else:
-        start_time = cli_start_time
-
-    logger.debug('End time and duration are %s %s',
-                 end_time, duration)
+    end_time = start_time + duration
+    logger.debug('Calculated end time: %s', end_time)
+    logger.debug('Start time, end time, and duration are %s, %s, and %s',
+                 start_time, end_time, duration)
 
     return start_time, duration
 
