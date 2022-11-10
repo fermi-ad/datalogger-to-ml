@@ -106,7 +106,7 @@ def parse_iso(date_time_duration_str) -> tuple[datetime, isodate.Duration]:
 
     return start_time, duration
 
-
+# Return a tuple (start_time, duration)
 def get_start_time_config(args: dict[str, Any], config: Any | dict) -> datetime | None:
     # Try to get the keyword argument from CLI, first
     start_time = args.get('start-time', args.get('start_time', None))
@@ -144,7 +144,7 @@ def get_duration_config(args: dict[str, Any], config: Any | dict) -> isodate.Dur
 
 
 def get_start_time(output_path, args, config):
-    start_time = get_start_time_config(args, config)
+    start_time, _ = get_start_time_config(args, config)
     duration = get_duration_config(args, config)
 
     h5_outputs = output_path.joinpath('**', '*.h5')
