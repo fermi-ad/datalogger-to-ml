@@ -170,7 +170,7 @@ def get_start_time(output_path, args, config):
 
     try:
         if file_start_time > start_time:
-            start_time = file_start_time
+            start_time = file_start_time + file_duration
     except NameError:
         if start_time is None:
             logger.error('Cannot determine start time.')
