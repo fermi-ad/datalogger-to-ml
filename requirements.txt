@@ -1,6 +1,6 @@
 --extra-index-url https://www-bd.fnal.gov/pip3
 
-acsys==0.10.0; python_version >= "3.6" \
+acsys; python_version >= "3.6" \
     --hash=sha256:e6f52cf66e52d5b3be6aed6b3d59655bd5c721d7e524a819337d91bdf8143b18
 backports-datetime-fromisoformat==1.0.0 ; python_full_version >= "3.6.8" and python_full_version < "4.0.0" \
     --hash=sha256:9577a2a9486cd7383a5f58b23bb8e81cf0821dbbc0eb7c87d3fa198c1df40f5c
