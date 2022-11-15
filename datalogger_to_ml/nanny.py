@@ -92,7 +92,7 @@ def get_latest_device_list(owner, repo, file_name):
     return None
 
 
-def parse_iso(date_time_duration_str) -> tuple[datetime, isodate.Duration]:
+def parse_iso(date_time_duration_str):
     try:
         date_time_str, duration_str = date_time_duration_str.split('P')
     except ValueError:
@@ -107,7 +107,7 @@ def parse_iso(date_time_duration_str) -> tuple[datetime, isodate.Duration]:
     return start_time, duration
 
 # Return a tuple (start_time, duration)
-def get_start_time_config(args: dict[str, Any], config: Any | dict) -> datetime | None:
+def get_start_time_config(args, config):
     # Try to get the keyword argument from CLI, first
     start_time = args.get('start-time', args.get('start_time', None))
 
@@ -122,7 +122,7 @@ def get_start_time_config(args: dict[str, Any], config: Any | dict) -> datetime 
     return parse_iso(start_time)
 
 
-def get_duration_config(args: dict[str, Any], config: Any | dict) -> isodate.Duration | None:
+def get_duration_config(args, config):
     # Try to get the keyword argument from CLI, first
     duration = args.get('duration', None)
 
