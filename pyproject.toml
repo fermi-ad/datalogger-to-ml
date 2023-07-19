@@ -11,6 +11,11 @@ datalogger-to-ml = 'datalogger_to_ml.__main__:main'
 [[tool.poetry.source]]
 name = 'fermi'
 url = 'https://www-bd.fnal.gov/pip3/'
+priority = "explicit"
+
+[[tool.poetry.source]]
+name = "PyPI"
+priority = "primary"
 
 [tool.poetry.dependencies]
 python = '^3.6.8'
@@ -20,7 +25,7 @@ isodate = '^0.6.0'
 pytz = '^2021.1'
 backports-datetime-fromisoformat = '^1.0.0'
 PyYAML = '^5.4.1'
-acsys = '^0.10.0'
+acsys = { version = '^0.10.0', source = 'fermi' }
 tables = "^3.6.1"
 
 [tool.poetry.dev-dependencies]
