@@ -71,7 +71,7 @@ def write_output(file, output):
 
 def get_latest_device_list_version(owner, repo):
     url = f'https://api.github.com/repos/{owner}/{repo}/releases/latest'
-    response = requests.get(url)
+    response = requests.get(url, allow_redirects=False)
 
     if response.status_code == requests.codes.get('ok'):
         return response.json()['name']
@@ -82,7 +82,7 @@ def get_latest_device_list_version(owner, repo):
 def get_latest_device_list(owner, repo, file_name):
     url = (f'https://github.com/{owner}/{repo}/'
            f'releases/latest/download/{file_name}')
-    response = requests.get(url)
+    response = requests.get(url, allow_redirects=False)
 
     if response.status_code == requests.codes.get('ok'):
         return [line.strip()  # Trim whitespace

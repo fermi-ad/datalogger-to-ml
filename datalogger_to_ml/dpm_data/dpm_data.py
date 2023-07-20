@@ -224,7 +224,7 @@ def _write_output(path, output):
 def _get_latest_device_list(output_filename=None):
     url = ('https://github.com/fermi-controls/linac-logger-device-cleaner/'
            'releases/latest/download/linac_logger_drf_requests.txt')
-    req = requests.get(url)
+    req = requests.get(url, allow_redirects=False)
 
     if req.status_code == requests.codes.get('ok'):
         device_list = [line.strip()  # Trim whitespace
