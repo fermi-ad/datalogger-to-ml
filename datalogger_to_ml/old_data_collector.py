@@ -52,7 +52,7 @@ def write_output(file, output):
 
 
 def get_latest_device_list_version(logger):
-    url = ('https://api.github.com/repos/fermi-controls/'
+    url = ('https://api.github.com/repos/fermi-ad/'
            'linac-logger-device-cleaner/releases/latest')
     response = requests.get(url, allow_redirects=False)
 
@@ -66,7 +66,7 @@ def get_latest_device_list_version(logger):
 
 
 def get_latest_device_list(output_path, logger):
-    url = ('https://github.com/fermi-controls/linac-logger-device-cleaner/'
+    url = ('https://github.com/fermi-ad/linac-logger-device-cleaner/'
            'releases/latest/download/linac_logger_drf_requests.txt')
     response = requests.get(url, allow_redirects=False)
 

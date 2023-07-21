@@ -27,7 +27,7 @@ Here's an example config file that uses GitHub to host the requests list:
 ```yaml
 ---
   github:
-    owner: fermi-controls
+    owner: fermi-ad
     repo: linac-logger-device-cleaner
     file: linac_logger_drf_requests.txt
   start: 20200101T000000
