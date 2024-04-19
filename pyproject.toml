@@ -18,15 +18,15 @@ name = "PyPI"
 priority = "primary"
 
 [tool.poetry.dependencies]
-python = '^3.6.8'
-pandas = '^1.1.5'
+python = '^3.9.18'
+pandas = '^2.2.2'
 requests = '^2.25.1'
 isodate = '^0.6.0'
 pytz = '^2021.1'
 backports-datetime-fromisoformat = '^1.0.0'
-PyYAML = '^5.4.1'
-acsys = { version = '^0.10.0', source = 'fermi' }
-tables = "^3.6.1"
+PyYAML = '^6.0.1'
+acsys = { version = '^0.12.8', source = 'fermi' }
+tables = "^3.9.2"
 
 [tool.poetry.dev-dependencies]
 pytest = '^6.2.2'
