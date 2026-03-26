@@ -6,9 +6,7 @@ version = "0.12.8"
 description = "ACSys Client library"
 optional = false
 python-versions = ">=3.6"
-files = [
-    {file = "acsys-0.12.8.tar.gz", hash = "sha256:baec8f9fdb17a00e04c186f845f62d8e60d98f49fda429f01423f5c1cccff5cf"},
-]
+files = []
 
 [package.dependencies]
 nest_asyncio = "*"
@@ -18,9 +16,10 @@ all = ["gssapi", "importlib-metadata", "nest_asyncio"]
 settings = ["gssapi"]
 
 [package.source]
-type = "legacy"
-url = "https://www-bd.fnal.gov/pip3"
-reference = "fermi"
+type = "git"
+url = "https://github.com/fermi-ad/acsys-python.git"
+reference = "v0.12.8"
+resolved_reference = "863dba83abd5d57292b675515aa86e09b0cd5883"
 
 [[package]]
 name = "atomicwrites"
@@ -933,4 +932,4 @@ zstd = ["zstandard (>=0.18.0)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9.18"
-content-hash = "c6ef461949bbd767b12f7eb32e1b56671b828a662c88e6185ce5ed7efda3b1e9"
+content-hash = "f8b7c2559146bff26de3fc026ec43a5b7f9fcf72f53a43e904978278692679ea"
