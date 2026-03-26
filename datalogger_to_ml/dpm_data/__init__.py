@@ -3,8 +3,10 @@
 
 from .dpm_data import local_to_utc_ms
 from .dpm_data import get_data
+from .dpm_data import compare_device_list
 from .dpm_data import compare_hdf_device_list
 from .dpm_data import generate_data_source
+from .dpm_data import OUTPUT_FORMATS
 
 # https://packaging.python.org/guides/single-sourcing-package-version/#single-sourcing-the-version
 try:
@@ -24,6 +26,8 @@ __all__ = [
     '__version__',
     'local_to_utc_ms',
     'get_data',
+    'compare_device_list',
     'compare_hdf_device_list',
-    'generate_data_source'
+    'generate_data_source',
+    'OUTPUT_FORMATS',
 ]

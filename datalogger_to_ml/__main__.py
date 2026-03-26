@@ -87,6 +87,13 @@ def main():
         type=isodate.parse_datetime,
         help='Date and time to start data acquisition.'
     )
+    nanny_parser.add_argument(
+        '--output-format',
+        type=str,
+        choices=['hdf5', 'csv', 'parquet'],
+        default='hdf5',
+        help='Output file format (default: hdf5).'
+    )
     dump_parser.add_argument(
         '-i',
         '--input-file',

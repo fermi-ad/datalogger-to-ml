@@ -29,6 +29,15 @@ class TestClass:
             assert dpm_data.compare_hdf_device_list(hdf, device_list, status_replies)
             assert dpm_data.compare_hdf_device_list(hdf, [], status_replies) is False
 
+    def test_compare_device_list(self):
+        device_list = ['G:AMANDA@e,12']
+        status_replies = [True]
+        written_keys = ['/G:AMANDA@e,12']
+
+        assert dpm_data.compare_device_list(written_keys, device_list, status_replies)
+        assert dpm_data.compare_device_list([], device_list, status_replies) is False
+        assert dpm_data.compare_device_list(written_keys, [], status_replies) is False
+
     def test_generate_data_source(self):
         input_start_time = datetime.datetime.fromisoformat('2021-02-01 19:00:00')
         input_end_time = datetime.datetime.fromisoformat('2021-02-01 20:00:00')
