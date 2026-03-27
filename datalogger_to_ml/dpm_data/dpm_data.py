@@ -21,6 +21,10 @@ OUTPUT_FORMATS = {
     'parquet': '.parquet',
 }
 
+IMPLEMENTED_OUTPUT_FORMATS = {
+    'hdf5': '.h5',
+}
+
 MonkeyPatch.patch_fromisoformat()
 
 # Set the acsys log to DEBUG
@@ -50,9 +54,9 @@ def compare_device_list(written_keys, device_list, status_replies):
             'device list are not present in the output.'
         ))
         logger.debug(
-            '%s devices are missing from the requested list of %s',
-            len(device_list) - len(written_keys),
-            len(device_list)
+            '%s devices requested, %s devices written',
+            len(device_list),
+            len(written_keys)
         )
 
         if status_replies.count(True) < len(status_replies):
@@ -193,10 +197,14 @@ def _open_output(output_file, output_format):
     if output_format == 'hdf5':
         with pd.HDFStore(output_file) as store:
             yield store
+    elif output_format in OUTPUT_FORMATS:
+        raise NotImplementedError(
+            f'Output format {output_format!r} is not yet implemented.'
+        )
     else:
         raise ValueError(
-            f'Unsupported output format: {output_format}. '
-            f'Supported formats: {list(OUTPUT_FORMATS.keys())}'
+            f'Unknown output format: {output_format!r}. '
+            f'Known formats: {list(OUTPUT_FORMATS.keys())}'
         )
 
 

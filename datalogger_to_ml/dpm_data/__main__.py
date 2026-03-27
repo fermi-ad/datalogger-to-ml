@@ -58,7 +58,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--output-format',
         type=str,
-        choices=['hdf5', 'csv', 'parquet'],
+        choices=list(dpm_data.IMPLEMENTED_OUTPUT_FORMATS.keys()),
         default='hdf5',
         help='Output file format (default: hdf5).'
     )
