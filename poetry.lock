@@ -6,9 +6,7 @@ version = "0.12.8"
 description = "ACSys Client library"
 optional = false
 python-versions = ">=3.6"
-files = [
-    {file = "acsys-0.12.8.tar.gz", hash = "sha256:baec8f9fdb17a00e04c186f845f62d8e60d98f49fda429f01423f5c1cccff5cf"},
-]
+files = []
 
 [package.dependencies]
 nest_asyncio = "*"
@@ -18,9 +16,10 @@ all = ["gssapi", "importlib-metadata", "nest_asyncio"]
 settings = ["gssapi"]
 
 [package.source]
-type = "legacy"
-url = "https://www-bd.fnal.gov/pip3"
-reference = "fermi"
+type = "git"
+url = "https://github.com/fermi-ad/acsys-python.git"
+reference = "v0.12.8"
+resolved_reference = "863dba83abd5d57292b675515aa86e09b0cd5883"
 
 [[package]]
 name = "atomicwrites"
@@ -915,13 +914,13 @@ files = [
 
 [[package]]
 name = "urllib3"
-version = "2.2.3"
+version = "2.6.3"
 description = "HTTP library with thread-safe connection pooling, file post, and more."
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 files = [
-    {file = "urllib3-2.2.3-py3-none-any.whl", hash = "sha256:ca899ca043dcb1bafa3e262d73aa25c465bfb49e0bd9dd5d59f1d0acba2f8fac"},
-    {file = "urllib3-2.2.3.tar.gz", hash = "sha256:e7d814a81dad81e6caf2ec9fdedb284ecc9c73076b62654547cc64ccdcae26e9"},
+    {file = "urllib3-2.6.3-py3-none-any.whl", hash = "sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4"},
+    {file = "urllib3-2.6.3.tar.gz", hash = "sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed"},
 ]
 
 [package.extras]
@@ -933,4 +932,4 @@ zstd = ["zstandard (>=0.18.0)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9.18"
-content-hash = "c2e681ab89829fa5486823fb9b8a79ad09c5944f539662650af9129b49a24705"
+content-hash = "f8b7c2559146bff26de3fc026ec43a5b7f9fcf72f53a43e904978278692679ea"
