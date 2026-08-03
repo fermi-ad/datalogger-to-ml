@@ -3,8 +3,14 @@
 
 import datetime
 import math
+import pytest
 import pandas as pd
 from datalogger_to_ml import dpm_data
+from datalogger_to_ml.dpm_data.dpm_data import (
+    OUTPUT_FORMATS,
+    IMPLEMENTED_OUTPUT_FORMATS,
+    _open_output,
+)
 
 class TestClass:
     def test_local_to_utc_ms(self):
@@ -29,6 +35,15 @@ class TestClass:
             assert dpm_data.compare_hdf_device_list(hdf, device_list, status_replies)
             assert dpm_data.compare_hdf_device_list(hdf, [], status_replies) is False
 
+    def test_compare_device_list(self):
+        device_list = ['G:AMANDA@e,12']
+        status_replies = [True]
+        written_keys = ['/G:AMANDA@e,12']
+
+        assert dpm_data.compare_device_list(written_keys, device_list, status_replies)
+        assert dpm_data.compare_device_list([], device_list, status_replies) is False
+        assert dpm_data.compare_device_list(written_keys, [], status_replies) is False
+
     def test_generate_data_source(self):
         input_start_time = datetime.datetime.fromisoformat('2021-02-01 19:00:00')
         input_end_time = datetime.datetime.fromisoformat('2021-02-01 20:00:00')
@@ -41,3 +56,36 @@ class TestClass:
             None
         )
         assert data_source == f'LOGGER:{output_start_time}:{output_end_time}'
+
+    def test_output_formats_extensions(self):
+        assert OUTPUT_FORMATS['hdf5'] == '.h5'
+        assert OUTPUT_FORMATS['csv'] == '.csv'
+        assert OUTPUT_FORMATS['parquet'] == '.parquet'
+
+    def test_implemented_output_formats_subset(self):
+        for fmt in IMPLEMENTED_OUTPUT_FORMATS:
+            assert fmt in OUTPUT_FORMATS
+            assert IMPLEMENTED_OUTPUT_FORMATS[fmt] == OUTPUT_FORMATS[fmt]
+
+    def test_open_output_hdf5_valid(self, tmp_path):
+        output_file = tmp_path / 'test.h5'
+        with _open_output(output_file, 'hdf5') as store:
+            assert isinstance(store, pd.HDFStore)
+
+    def test_open_output_csv_not_implemented(self, tmp_path):
+        output_file = tmp_path / 'test.csv'
+        with pytest.raises(NotImplementedError):
+            with _open_output(output_file, 'csv'):
+                pass
+
+    def test_open_output_parquet_not_implemented(self, tmp_path):
+        output_file = tmp_path / 'test.parquet'
+        with pytest.raises(NotImplementedError):
+            with _open_output(output_file, 'parquet'):
+                pass
+
+    def test_open_output_unknown_format_raises_value_error(self, tmp_path):
+        output_file = tmp_path / 'test.xyz'
+        with pytest.raises(ValueError, match='Unknown output format'):
+            with _open_output(output_file, 'xyz'):
+                pass

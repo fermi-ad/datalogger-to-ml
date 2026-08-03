@@ -6,6 +6,7 @@ import logging
 import sys
 import warnings
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import signal
 import pandas as pd
@@ -13,6 +14,16 @@ import acsys.dpm
 import pytz
 from backports.datetime_fromisoformat import MonkeyPatch
 import requests
+
+OUTPUT_FORMATS = {
+    'hdf5': '.h5',
+    'csv': '.csv',
+    'parquet': '.parquet',
+}
+
+IMPLEMENTED_OUTPUT_FORMATS = {
+    'hdf5': '.h5',
+}
 
 MonkeyPatch.patch_fromisoformat()
 
@@ -36,18 +47,16 @@ def local_to_utc_ms(date):
     return time_in_ms
 
 
-def compare_hdf_device_list(hdf, device_list, status_replies):
-    hdf_keys = hdf.keys()
-
-    if len(hdf_keys) != len(device_list):
+def compare_device_list(written_keys, device_list, status_replies):
+    if len(written_keys) != len(device_list):
         logger.error((
             'Empty DAQ for certain devices. All devices from '
-            'device list are not present in the HDF5.'
+            'device list are not present in the output.'
         ))
         logger.debug(
-            '%s devices are missing from the requested list of %s',
-            len(device_list) - len(hdf_keys),
-            len(device_list)
+            '%s devices requested, %s devices written',
+            len(device_list),
+            len(written_keys)
         )
 
         if status_replies.count(True) < len(status_replies):
@@ -66,7 +75,11 @@ def compare_hdf_device_list(hdf, device_list, status_replies):
     return True
 
 
-def _create_data_processor(device_list, hdf):
+def compare_hdf_device_list(hdf, device_list, status_replies):
+    return compare_device_list(hdf.keys(), device_list, status_replies)
+
+
+def _create_data_processor(device_list, store):
     data_done = [None] * len(device_list)
     data_store = {}
 
@@ -86,7 +99,7 @@ def _create_data_processor(device_list, hdf):
                     'Data received after final response for %s',
                     request
                 )
-                hdf.append(request, data_frame)
+                store.append(request, data_frame)
             else:
                 if request in data_store.keys():
                     data_store[request] = data_store[request].append(
@@ -97,7 +110,7 @@ def _create_data_processor(device_list, hdf):
             # DPM tells us there is no more data with an empty list
             if len(event_response.data) == 0:
                 # Write data to file
-                hdf.append(request, data_store[request])
+                store.append(request, data_store[request])
                 data_done[event_response.tag] = True
                 logger.debug(
                     '%s of %s requests still processing.',
@@ -137,7 +150,7 @@ def _create_data_processor(device_list, hdf):
 
 def _create_dpm_request(
     device_list,
-    hdf,
+    store,
     request_type=None,
     dpm_node=None
 ):
@@ -157,7 +170,7 @@ def _create_dpm_request(
             await dpm.start(request_type)
 
             # Track replies for each device
-            process_data = _create_data_processor(device_list, hdf)
+            process_data = _create_data_processor(device_list, store)
             data_done = []
 
             # Process incoming data
@@ -174,9 +187,25 @@ def _create_dpm_request(
                             )
                     break
 
-            compare_hdf_device_list(hdf, device_list, data_done)
+            compare_device_list(store.keys(), device_list, data_done)
 
     return _dpm_request
+
+
+@contextmanager
+def _open_output(output_file, output_format):
+    if output_format == 'hdf5':
+        with pd.HDFStore(output_file) as store:
+            yield store
+    elif output_format in OUTPUT_FORMATS:
+        raise NotImplementedError(
+            f'Output format {output_format!r} is not yet implemented.'
+        )
+    else:
+        raise ValueError(
+            f'Unknown output format: {output_format!r}. '
+            f'Known formats: {list(OUTPUT_FORMATS.keys())}'
+        )
 
 
 def generate_data_source(start_date, end_date, duration):
@@ -269,9 +298,14 @@ def get_data(**kwargs):
     duration = kwargs.get('duration', None)
     device_limit = kwargs.get('device-limit', 0)
     device_file = kwargs.get('device-file', kwargs.get('device_file', None))
+    output_format = kwargs.get(
+        'output-format',
+        kwargs.get('output_format', 'hdf5')
+    )
+    file_extension = OUTPUT_FORMATS[output_format]
     output_file = kwargs.get(
         'output-file',
-        kwargs.get('output_file', Path('data.h5'))
+        kwargs.get('output_file', Path(f'data{file_extension}'))
     )
     dpm_node = kwargs.get('dpm-node', kwargs.get('dpm_node', None))
     debug = kwargs.get('debug', False)
@@ -285,7 +319,8 @@ def get_data(**kwargs):
     logger.debug(
         (
             'start_date: %s, end_date: %s, duration: %s, device_file: %s, '
-            'dpm_node: %s, device_limit: %s, output_file: %s, debug: %s'
+            'dpm_node: %s, device_limit: %s, output_file: %s, '
+            'output_format: %s, debug: %s'
         ),
         start_date,
         end_date,
@@ -294,6 +329,7 @@ def get_data(**kwargs):
         dpm_node,
         device_limit,
         output_file,
+        output_format,
         debug
     )
 
@@ -304,10 +340,10 @@ def get_data(**kwargs):
     data_source = generate_data_source(start_date, end_date, duration)
     logger.debug('data_source: %s', data_source)
 
-    with pd.HDFStore(output_file) as hdf:
+    with _open_output(output_file, output_format) as store:
         get_logger_data = _create_dpm_request(
             device_list,
-            hdf,
+            store,
             data_source,
             dpm_node
         )

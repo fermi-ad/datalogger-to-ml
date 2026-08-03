@@ -53,7 +53,14 @@ if __name__ == '__main__':
         '-o',
         '--output-file',
         type=Path,
-        help='Name of the output file for the hdf5 file.'
+        help='Name of the output file.'
+    )
+    parser.add_argument(
+        '--output-format',
+        type=str,
+        choices=list(dpm_data.IMPLEMENTED_OUTPUT_FORMATS.keys()),
+        default='hdf5',
+        help='Output file format (default: hdf5).'
     )
     parser.add_argument(
         '-n',

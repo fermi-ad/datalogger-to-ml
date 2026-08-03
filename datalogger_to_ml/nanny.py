@@ -16,6 +16,7 @@ import isodate
 import requests
 import yaml
 from . import dpm_data
+from .dpm_data import OUTPUT_FORMATS
 
 
 logger = logging.getLogger(__name__)
@@ -143,13 +144,14 @@ def get_duration_config(args, config):
 #     Time constraints with files
 
 
-def get_start_time(output_path, args, config):
+def get_start_time(output_path, args, config, output_format='hdf5'):
     start_time, _ = get_start_time_config(args, config)
     duration = get_duration_config(args, config)
 
-    h5_outputs = output_path.joinpath('**', '*.h5')
+    file_extension = OUTPUT_FORMATS[output_format]
+    outputs_pattern = output_path.joinpath('**', f'*{file_extension}')
     # Glob allows the use of the * wildcard
-    file_paths = glob(str(h5_outputs), recursive=True)
+    file_paths = glob(str(outputs_pattern), recursive=True)
     files = list(map(lambda path: PurePath(path).name, file_paths))
     # Sort modifies the list in place
     files.sort()
@@ -265,6 +267,20 @@ def get_output_path(args, config):
     return outputs_directory
 
 
+def get_output_format(args, config):
+    # Try to get the keyword argument from CLI, first
+    output_format = args.get('output-format', args.get('output_format', None))
+
+    # Determine input to use for output configuration
+    if output_format is None and 'output' in config.keys():
+        try:
+            output_format = config['output']['format']
+        except KeyError:
+            logger.debug('Output config does not contain "format".')
+
+    return output_format or 'hdf5'
+
+
 def handle_device_list_version(config):
     device_list_version = None
 
@@ -350,8 +366,11 @@ def get_data(**kwargs):
 
     requests_list, device_list_version = get_request_list(kwargs, config)
 
+    output_format = get_output_format(kwargs, config)
+    file_extension = OUTPUT_FORMATS[output_format]
+
     # get_start_time always returns
-    start_time, duration = get_start_time(outputs_directory, kwargs, config)
+    start_time, duration = get_start_time(outputs_directory, kwargs, config, output_format)
     end_time = start_time + duration
 
     continue_loop = True
@@ -370,7 +389,7 @@ def get_data(**kwargs):
         logger.debug('Named the output file: %s', iso_datetime_duration)
 
         request_list_version = device_list_version.replace('.', '_')
-        output_filename = f'{iso_datetime_duration}-{request_list_version}.h5'
+        output_filename = f'{iso_datetime_duration}-{request_list_version}{file_extension}'
         temp_path_and_filename = Path('.').joinpath(output_filename)
         output_path_and_filename = Path(
             structured_outputs_directory
@@ -395,6 +414,7 @@ def get_data(**kwargs):
             end_date=end_time,
             device_file=requests_list,
             output_file=temp_path_and_filename,
+            output_format=output_format,
             debug=True
         )
 

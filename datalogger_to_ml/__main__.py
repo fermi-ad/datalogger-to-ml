@@ -7,6 +7,7 @@ import isodate
 from . import h5_dump
 from . import nanny
 from . import h5_validator
+from .dpm_data.dpm_data import IMPLEMENTED_OUTPUT_FORMATS
 
 # https://packaging.python.org/guides/single-sourcing-package-version/#single-sourcing-the-version
 try:
@@ -86,6 +87,13 @@ def main():
         '--start-time',
         type=isodate.parse_datetime,
         help='Date and time to start data acquisition.'
+    )
+    nanny_parser.add_argument(
+        '--output-format',
+        type=str,
+        choices=list(IMPLEMENTED_OUTPUT_FORMATS.keys()),
+        default='hdf5',
+        help='Output file format (default: hdf5).'
     )
     dump_parser.add_argument(
         '-i',
