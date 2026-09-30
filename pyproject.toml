@@ -13,7 +13,7 @@ name = "PyPI"
 priority = "primary"
 
 [tool.poetry.dependencies]
-python = '^3.9.18'
+python = '^3.11'
 pandas = '^2.2.2'
 requests = '^2.25.1'
 isodate = '^0.6.0'
@@ -25,7 +25,7 @@ tables = "^3.9.2"
 urllib3 = "^2.6.3"
 
 [tool.poetry.dev-dependencies]
-pytest = '^6.2.2'
+pytest = '^9.0.3'
 flake8 = '^3.9.0'
 
 [build-system]
