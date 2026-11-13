@@ -12,7 +12,6 @@ import signal
 import pandas as pd
 import acsys.dpm
 import pytz
-from backports.datetime_fromisoformat import MonkeyPatch
 import requests
 
 OUTPUT_FORMATS = {
@@ -24,8 +23,6 @@ OUTPUT_FORMATS = {
 IMPLEMENTED_OUTPUT_FORMATS = {
     'hdf5': '.h5',
 }
-
-MonkeyPatch.patch_fromisoformat()
 
 # Set the acsys log to DEBUG
 acsys_log = logging.getLogger('acsys')
@@ -102,8 +99,11 @@ def _create_data_processor(device_list, store):
                 store.append(request, data_frame)
             else:
                 if request in data_store.keys():
-                    data_store[request] = data_store[request].append(
-                        data_frame)
+                    # DataFrame.append was removed in pandas 2.0. Skip the empty
+                    # end-of-data chunk: concatenating it only adds a dtype warning.
+                    if len(data_frame):
+                        data_store[request] = pd.concat(
+                            [data_store[request], data_frame])
                 else:
                     data_store[request] = data_frame
 
