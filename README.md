@@ -6,6 +6,8 @@ CLI for requesting AD Controls data logger data and transforming those to the de
 
 In your environment, run `pip install --extra-index-url https://www-bd.fnal.gov/pip3 datalogger-to-ml`. This will install this package as a command line tool. You should now be able to run `datalogger-to-ml --help` to see what commands are available.
 
+For development, or to run it without managing an environment, use [pixi](https://pixi.sh): `pixi install` creates the environment from `pyproject.toml` and `pixi.lock`, and `pixi run datalogger-to-ml --help` runs the tool in it.
+
 ## Usage
 
 There are three sub-commands this CLI provides.
@@ -87,24 +89,12 @@ Optionally, the `-o` or `--output-file` flags can be used to specify the path of
 
 ## Contributing
 
-A [`Makefile`](./Makefile) is used for installation, building, deploying, and cleaning up.
+[pixi](https://pixi.sh) manages the environment and the tasks, all defined in [`pyproject.toml`](./pyproject.toml); `pixi.lock` pins every package.
 
-### Installing dependencies
+- `pixi install` creates the environment (conda-forge packages, plus `acsys` from its GitHub tag).
+- `pixi run test` runs the tests; `pixi run lint` runs flake8.
+- `pixi run build` creates the wheel and source archive in [`dist`](./dist).
+- `pixi run deploy` builds, then copies `dist` to the AD pip repository.
+- `pixi run clean` removes build output and `nanny.log`.
 
-[`poetry`](https://python-poetry.org/) is used to manage dependencies.
-
-`make install` installs the requirements from the [`pyproject.toml`](./pyproject.toml) file.
-
-### Building
-
-`make build` creates new pip archives in [`dist`](./dist) and update the [`requirements.txt`](./requirements.txt).
-
-### Deployment
-
-`make deploy` copies the [`dist`](./dist) folder to the AD pip repository.
-
-Don't forget to change the version number in [`pyproject.toml`](./pyproject.toml) before publishing
-
-### Cleaning
-
-`make clean` removes files and folders generated as a part of the build process.
+Don't forget to change the version number in [`pyproject.toml`](./pyproject.toml) before publishing.

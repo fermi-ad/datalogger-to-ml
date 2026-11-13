@@ -21,7 +21,7 @@ def get_version():
     __version__ = 'v*.*.*'
 
     try:
-        __version__ = metadata.version(__name__)
+        __version__ = metadata.version('datalogger-to-ml')
     except metadata.PackageNotFoundError:
         pass
 

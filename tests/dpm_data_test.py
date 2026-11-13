@@ -89,3 +89,22 @@ class TestClass:
         with pytest.raises(ValueError, match='Unknown output format'):
             with _open_output(output_file, 'xyz'):
                 pass
+
+
+def test_data_processor_joins_chunks():
+    """A device's reply in several chunks is joined into one frame (the pandas 2 regression)."""
+    import acsys.dpm
+    import pandas as pd
+    from datalogger_to_ml.dpm_data.dpm_data import _create_data_processor
+
+    class Store(dict):
+        def append(self, key, frame):
+            self[key] = pd.concat([self[key], frame]) if key in self else frame
+
+    store = Store()
+    process = _create_data_processor(['A:DEV'], store)
+    assert process(acsys.dpm.ItemData(0, 0, [1.0, 2.0], micros=[10, 20])) is False
+    assert process(acsys.dpm.ItemData(0, 0, [3.0], micros=[30])) is False
+    assert process(acsys.dpm.ItemData(0, 0, [], micros=[])) == [True]
+    assert list(store['A:DEV']['Data']) == [1.0, 2.0, 3.0]
+    assert list(store['A:DEV']['Timestamps']) == [10, 20, 30]

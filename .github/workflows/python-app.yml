@@ -1,6 +1,4 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
-# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
-
+# Lint and test in the pixi environment defined in pyproject.toml (pixi.lock pins every package).
 name: Python application
 
 on:
@@ -11,31 +9,15 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v2
+    - uses: actions/checkout@v7
+    - uses: prefix-dev/setup-pixi@v0.11.3
       with:
-        python-version: '3.11'
-    - name: Install python-gssapi
-      run: |
-        sudo apt-get update -y
-        sudo apt-get install -y libkrb5-dev
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install flake8 pytest
-        if [ -f requirements-vcs.txt ]; then pip install --extra-index-url https://www-bd.fnal.gov/pip3 -r requirements-vcs.txt; fi
-        if [ -f requirements.txt ]; then pip install --extra-index-url https://www-bd.fnal.gov/pip3 -r requirements.txt; fi
+        pixi-version: v0.82.0
+        cache: true
     - name: Lint with flake8
-      run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      run: pixi run lint
     - name: Test with pytest
-      run: |
-        python -m pytest
+      run: pixi run test
