@@ -91,20 +91,60 @@ class TestClass:
                 pass
 
 
-def test_data_processor_joins_chunks():
-    """A device's reply in several chunks is joined into one frame (the pandas 2 regression)."""
-    import acsys.dpm
+def test_with_source():
+    from datalogger_to_ml.dpm_data.dpm_data import _with_source
+    assert _with_source('M:OUTTMP', 'LOGGER:1:2') == 'M:OUTTMP<-LOGGER:1:2'
+    assert _with_source('M:OUTTMP<-LOGGERDURATION:60000', 'LOGGER:1:2') == 'M:OUTTMP<-LOGGERDURATION:60000'
+
+
+def _timed(drf, data, micros):
+    import numpy as np
+    from pacsys.types import Reading, ValueType
+    return Reading(drf=drf, value_type=ValueType.TIMED_SCALAR_ARRAY,
+                   value={'data': np.asarray(data, dtype=float), 'micros': np.asarray(micros, dtype=np.int64)})
+
+
+def test_reading_to_frame():
+    from pacsys.types import Reading
+    from datalogger_to_ml.dpm_data.dpm_data import _reading_to_frame
+    scalar = _reading_to_frame(_timed('A', [1.0, 2.0, 3.0], [10, 20, 30]))
+    assert list(scalar.columns) == ['Timestamps', 'Data']
+    assert list(scalar['Data']) == [1.0, 2.0, 3.0] and list(scalar['Timestamps']) == [10, 20, 30]
+    array = _reading_to_frame(_timed('B', [[1, 2], [3, 4]], [10, 20]))
+    assert list(array.columns) == ['Timestamps', 'Data[0]', 'Data[1]'] and list(array['Data[1]']) == [2, 4]
+    assert _reading_to_frame(Reading(drf='C', error_code=-6, message='no such device')) is None
+
+
+def test_read_logger_writes_each_device(monkeypatch):
+    """One batch read; good devices are written under their request name, failures are reported."""
     import pandas as pd
-    from datalogger_to_ml.dpm_data.dpm_data import _create_data_processor
+    from pacsys.types import Reading
+    from datalogger_to_ml.dpm_data import dpm_data
+
+    asked = {}
+
+    class Backend:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get_many(self, drfs, timeout=None):
+            asked['drfs'], asked['timeout'] = drfs, timeout
+            return [_timed(drfs[0], [1.0, 2.0], [10, 20]), Reading(drf=drfs[1], error_code=-6, message='no such device')]
+
+    monkeypatch.setattr(dpm_data.pacsys, 'dpm', lambda host=None: Backend())
+    calls = []
+    monkeypatch.setattr(dpm_data, 'compare_device_list', lambda keys, devices, replies: calls.append((list(keys), replies)))
 
     class Store(dict):
         def append(self, key, frame):
             self[key] = pd.concat([self[key], frame]) if key in self else frame
 
     store = Store()
-    process = _create_data_processor(['A:DEV'], store)
-    assert process(acsys.dpm.ItemData(0, 0, [1.0, 2.0], micros=[10, 20])) is False
-    assert process(acsys.dpm.ItemData(0, 0, [3.0], micros=[30])) is False
-    assert process(acsys.dpm.ItemData(0, 0, [], micros=[])) == [True]
-    assert list(store['A:DEV']['Data']) == [1.0, 2.0, 3.0]
-    assert list(store['A:DEV']['Timestamps']) == [10, 20, 30]
+    dpm_data._read_logger(['A:GOOD', 'B:BAD'], store, 'LOGGER:1:2')
+    assert asked['drfs'] == ['A:GOOD<-LOGGER:1:2', 'B:BAD<-LOGGER:1:2']
+    assert asked['timeout'] == dpm_data.DEFAULT_TIMEOUT
+    assert list(store) == ['A:GOOD'] and list(store['A:GOOD']['Data']) == [1.0, 2.0]
+    assert calls == [(['A:GOOD'], [True, 'no such device'])]

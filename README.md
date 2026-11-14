@@ -91,7 +91,7 @@ Optionally, the `-o` or `--output-file` flags can be used to specify the path of
 
 [pixi](https://pixi.sh) manages the environment and the tasks, all defined in [`pyproject.toml`](./pyproject.toml); `pixi.lock` pins every package.
 
-- `pixi install` creates the environment (conda-forge packages, plus `acsys` from its GitHub tag).
+- `pixi install` creates the environment (conda-forge packages, plus `pacsys` from PyPI).
 - `pixi run test` runs the tests; `pixi run lint` runs flake8.
 - `pixi run build` creates the wheel and source archive in [`dist`](./dist).
 - `pixi run deploy` builds, then copies `dist` to the AD pip repository.
