@@ -9,8 +9,10 @@ import os
 from contextlib import contextmanager
 from pathlib import Path
 import signal
+import numpy as np
 import pandas as pd
-import acsys.dpm
+import pacsys
+from pacsys.types import ValueType
 import pytz
 import requests
 
@@ -24,9 +26,9 @@ IMPLEMENTED_OUTPUT_FORMATS = {
     'hdf5': '.h5',
 }
 
-# Set the acsys log to DEBUG
-acsys_log = logging.getLogger('acsys')
-acsys_log.setLevel(logging.DEBUG)
+# Set the pacsys log to DEBUG
+pacsys_log = logging.getLogger('pacsys')
+pacsys_log.setLevel(logging.DEBUG)
 
 # Local logger
 logger = logging.getLogger(__name__)
@@ -76,120 +78,58 @@ def compare_hdf_device_list(hdf, device_list, status_replies):
     return compare_device_list(hdf.keys(), device_list, status_replies)
 
 
-def _create_data_processor(device_list, store):
-    data_done = [None] * len(device_list)
-    data_store = {}
+# Total time allowed for one batch read. Untested: a long window over many devices has not
+# been timed through pacsys yet; raise it if pulls time out.
+DEFAULT_TIMEOUT = 600.0
 
-    def _run(event_response):
-        # This is a data response
-        if isinstance(event_response, acsys.dpm.ItemData):
-            request = device_list[event_response.tag]
-            dpm_data = {
-                'Timestamps': event_response.micros,
-                'Data': event_response.data
-            }
-            data_frame = pd.DataFrame(data=dpm_data)
 
-            # If we think data is done and more arrives, write it to the file
-            if data_done[event_response.tag]:
-                logger.warning(
-                    'Data received after final response for %s',
-                    request
-                )
-                store.append(request, data_frame)
-            else:
-                if request in data_store.keys():
-                    # DataFrame.append was removed in pandas 2.0. Skip the empty
-                    # end-of-data chunk: concatenating it only adds a dtype warning.
-                    if len(data_frame):
-                        data_store[request] = pd.concat(
-                            [data_store[request], data_frame])
-                else:
-                    data_store[request] = data_frame
+def _with_source(request, data_source):
+    """Attach the logger data source to a DRF request, unless the request names its own."""
+    return request if '<-' in request else f'{request}<-{data_source}'
 
-            # DPM tells us there is no more data with an empty list
-            if len(event_response.data) == 0:
-                # Write data to file
-                store.append(request, data_store[request])
-                data_done[event_response.tag] = True
-                logger.debug(
-                    '%s of %s requests still processing.',
-                    data_done.count(None),
-                    len(device_list)
-                )
 
-        # Status instead of actual data.
-        elif isinstance(event_response, acsys.dpm.ItemStatus):
-            # Want to make it status, but can't because of the bug
-            data_done[event_response.tag] = event_response.status
+def _reading_to_frame(reading):
+    """Turn a pacsys logger reading into a frame of Timestamps (microseconds) and Data.
+
+    pacsys joins the logger's reply chunks into one timed array. Array devices give one row per
+    record, with a Data[i] column per element. Returns None when the reading carries no data.
+    """
+    if not reading.ok or reading.value_type != ValueType.TIMED_SCALAR_ARRAY:
+        return None
+    data = np.asarray(reading.value['data'])
+    micros = np.asarray(reading.value['micros'])
+    if data.ndim == 2:
+        frame = pd.DataFrame(data, columns=[f'Data[{i}]' for i in range(data.shape[1])])
+        frame.insert(0, 'Timestamps', micros)
+        return frame
+    return pd.DataFrame({'Timestamps': micros, 'Data': data})
+
+
+def _read_logger(device_list, store, data_source, dpm_host=None,
+                 timeout=DEFAULT_TIMEOUT):
+    """Read every device's logged history in one batch and write each to the store."""
+    drfs = [_with_source(device, data_source) for device in device_list]
+    logger.debug('Starting DAQ...')
+    with pacsys.dpm(host=dpm_host) as backend:
+        readings = backend.get_many(drfs, timeout=timeout)
+    logger.info('Data acquisition complete')
+
+    status_replies = []
+    for request, reading in zip(device_list, readings):
+        frame = _reading_to_frame(reading)
+        if frame is not None and len(frame):
+            store.append(request, frame)
+        if not reading.ok:
             logger.warning(
-                'Returned status message %s for %s',
-                event_response.status,
-                device_list[event_response.tag]
+                'Returned status %s for %s',
+                reading.message or reading.error_code,
+                request
             )
+        status_replies.append(
+            True if reading.ok else (reading.message or reading.error_code)
+        )
 
-        elif isinstance(event_response, acsys.dpm.DeviceInfo_reply):
-            # We don't use DeviceInfo objects so we can ignore them
-            pass
-
-        else:
-            logger.debug(
-                'Unknown data response type: %s',
-                event_response
-            )
-
-        # If all devices have a reply, we're done
-        if data_done.count(None) == 0:
-            logger.info('Data received for all devices')
-            return data_done
-
-        return False
-
-    return _run
-
-
-def _create_dpm_request(
-    device_list,
-    store,
-    request_type=None,
-    dpm_node=None
-):
-    async def _dpm_request(con):
-        # Setup context
-        async with acsys.dpm.DPMContext(con, dpm_node=dpm_node) as dpm:
-            drf_requests = []
-
-            for index, device in enumerate(device_list):
-                drf_requests.append((index, device))
-
-            # Add acquisition requests
-            await dpm.add_entries(drf_requests)
-
-            # Start acquisition
-            logger.debug('Starting DAQ...')
-            await dpm.start(request_type)
-
-            # Track replies for each device
-            process_data = _create_data_processor(device_list, store)
-            data_done = []
-
-            # Process incoming data
-            async for event_response in dpm:
-                data_done = process_data(event_response)
-
-                if data_done:
-                    logger.info('Data acquisition complete')
-                    for index, data in enumerate(data_done):
-                        if data is None:
-                            logger.debug(
-                                'No response from: %s',
-                                device_list[index]
-                            )
-                    break
-
-            compare_device_list(store.keys(), device_list, data_done)
-
-    return _dpm_request
+    compare_device_list(store.keys(), device_list, status_replies)
 
 
 @contextmanager
@@ -307,7 +247,7 @@ def get_data(**kwargs):
         'output-file',
         kwargs.get('output_file', Path(f'data{file_extension}'))
     )
-    dpm_node = kwargs.get('dpm-node', kwargs.get('dpm_node', None))
+    dpm_host = kwargs.get('dpm-host', kwargs.get('dpm_host', None))
     debug = kwargs.get('debug', False)
 
     # Silence STDOUT warnings
@@ -319,14 +259,14 @@ def get_data(**kwargs):
     logger.debug(
         (
             'start_date: %s, end_date: %s, duration: %s, device_file: %s, '
-            'dpm_node: %s, device_limit: %s, output_file: %s, '
+            'dpm_host: %s, device_limit: %s, output_file: %s, '
             'output_format: %s, debug: %s'
         ),
         start_date,
         end_date,
         duration,
         device_file,
-        dpm_node,
+        dpm_host,
         device_limit,
         output_file,
         output_format,
@@ -341,11 +281,4 @@ def get_data(**kwargs):
     logger.debug('data_source: %s', data_source)
 
     with _open_output(output_file, output_format) as store:
-        get_logger_data = _create_dpm_request(
-            device_list,
-            store,
-            data_source,
-            dpm_node
-        )
-
-        acsys.run_client(get_logger_data)
+        _read_logger(device_list, store, data_source, dpm_host)
