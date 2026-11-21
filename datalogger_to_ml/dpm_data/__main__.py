@@ -63,10 +63,9 @@ if __name__ == '__main__':
         help='Output file format (default: hdf5).'
     )
     parser.add_argument(
-        '-n',
-        '--dpm-node',
+        '--dpm-host',
         type=str,
-        help='Set the DPM node to request data from.'
+        help='DPM proxy hostname (default: acsys-proxy.fnal.gov, or PACSYS_DPM_HOST).'
     )
     parser.add_argument(
         '-s',

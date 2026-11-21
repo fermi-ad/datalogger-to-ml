@@ -14,9 +14,9 @@ There are three sub-commands this CLI provides.
 
 ### Nanny
 
-The `nanny` sub-command generates hdf5 data files from the AD data loggers. `nanny` will write files to the local path, `.`, during data collection and move them to a `YYYYMM/DD/` directory structure once the files are complete. The generated data files are named using the [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) standard for timestamps with a period. The name of the file indicates the start time and duration. The name of the file also includes a version number at the end as a marker of requests list modification. e.g., `20200101T000000PT1H-1_0_0.h5`
+The `nanny` sub-command generates data files, HDF5 or Parquet, from the AD data loggers, one file per time window, in a `YYYYMM/DD/` directory structure under the output path. Each file is written beside its destination with a `.partial` suffix and renamed once complete, so a crash never leaves a half-written file under a real name. The generated data files are named using the [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) standard for timestamps with a period. The name of the file indicates the start time and duration. The name of the file also includes a version number at the end as a marker of requests list modification. e.g., `20200101T000000PT1H-1_0_0.h5`
 
-`nanny` attempts to determine a start date based on filenames in the `output_path`. If there is not a valid named file in the output path then `nanny` requests data from 1 hour ago to now. The duration is static, for now. If `nanny` finds a valid filename then it will calculate a `start_time` for the new data from the most recent filename. By default, `nanny` will loop through time making 1 hour requests for data until the `output_path` has a current filename.
+Each run lists every whole window from the configured start to now and pulls each one that has no file yet, in any request-list version, newest first, so a skipped or failed window is retried on the next run and, during a long backfill, the latest windows land first. Run it from cron under `flock` and every gap fills itself. Without a configured start, `nanny` fills back to its earliest existing file, or pulls only the newest whole window.
 
 Arguments can be passed to `nanny` in two ways. Command line flags are provided for convenience and easy troubleshooting, but it is recommended to create a config file named `config.yaml` for persistent processes.
 
@@ -57,7 +57,9 @@ Here's an example config file that uses a local requests list:
 
 ```
 
-When using the config file, a start datetime and duration can be specified. The default duration is one hour and the default start time is one duration ago.
+When using the config file, a start datetime and duration can be specified. The default duration is one hour; without a start, see above.
+
+The output format is `hdf5` (one table per request, keyed by the request) unless `output.format` in the config or `--output-format` says `parquet`: one long table per window with columns `device` (the request), `Timestamps` (microseconds, Unix epoch), and `Data`. Long rather than one column per device, because each device carries its own timestamps; an array device becomes one `device[i]` series per element.
 
 #### CLI arguments
 
@@ -79,7 +81,7 @@ The `--run-once` flag disables the "get data to now" feature.
 
 ### Validate
 
-The `validate` sub-command is a simple program that takes paths as arguments and will validate that all the `*.h5` files in that directory are not corrupt.
+The `validate` sub-command is a simple program that takes a path and checks that every `*.h5` and `*.parquet` file under it, subfolders included, can be read.
 
 ### Dump
 
@@ -91,7 +93,7 @@ Optionally, the `-o` or `--output-file` flags can be used to specify the path of
 
 [pixi](https://pixi.sh) manages the environment and the tasks, all defined in [`pyproject.toml`](./pyproject.toml); `pixi.lock` pins every package.
 
-- `pixi install` creates the environment (conda-forge packages, plus `acsys` from its GitHub tag).
+- `pixi install` creates the environment (conda-forge packages, plus `pacsys` from PyPI).
 - `pixi run test` runs the tests; `pixi run lint` runs flake8.
 - `pixi run build` creates the wheel and source archive in [`dist`](./dist).
 - `pixi run deploy` builds, then copies `dist` to the AD pip repository.
