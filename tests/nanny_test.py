@@ -41,6 +41,8 @@ def _run_nanny(tmp_path, monkeypatch, **extra):
     pulled = []
 
     def fake_get_data(**kwargs):
+        # Files are built in the local workbench, never in the output path (which may be write-once pnfs).
+        assert kwargs['output_file'].parent.resolve() == (tmp_path / 'workbench').resolve()
         pulled.append(kwargs['start_date'])
         kwargs['output_file'].write_bytes(b'x')
 
@@ -61,6 +63,7 @@ def test_nanny_fills_holes_newest_first(tmp_path, monkeypatch):
     assert pulled == [newest, start]
     names = sorted(p.name for p in (tmp_path / 'out').rglob('*') if p.is_file())
     assert len(names) == 3 and not any(n.endswith('.partial') for n in names)
+    assert list((tmp_path / 'workbench').iterdir()) == []
 
 
 def test_nanny_run_once_takes_only_the_newest(tmp_path, monkeypatch):
@@ -102,3 +105,27 @@ def test_config_output_format_is_not_overridden_by_the_cli_default(tmp_path, mon
     cli.main()
     assert 'output_format' not in seen and 'output-format' not in seen
     assert nanny.get_output_format(seen, {'output': {'format': 'parquet'}}) == 'parquet'
+
+
+def test_deliver_across_filesystems_replaces_a_stale_partial(tmp_path, monkeypatch):
+    """Across filesystems (EXDEV) the file is copied in as .partial, then renamed; a .partial left by an
+    interrupted copy is removed first, since write-once storage cannot overwrite it."""
+    import errno
+    work = tmp_path / 'workbench' / 'w.parquet'
+    work.parent.mkdir()
+    work.write_bytes(b'complete')
+    dest = tmp_path / 'out' / 'w.parquet'
+    dest.parent.mkdir()
+    (dest.parent / 'w.parquet.partial').write_bytes(b'half')
+
+    real_replace = nanny.replace
+
+    def cross_device_first(src, dst):
+        if str(src).startswith(str(work.parent)):
+            raise OSError(errno.EXDEV, 'Invalid cross-device link')
+        return real_replace(src, dst)
+    monkeypatch.setattr(nanny, 'replace', cross_device_first)
+
+    nanny.deliver(work, dest)
+    assert dest.read_bytes() == b'complete'
+    assert not work.exists() and not (dest.parent / 'w.parquet.partial').exists()

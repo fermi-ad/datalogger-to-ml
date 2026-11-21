@@ -4,7 +4,9 @@
 from glob import glob
 from pathlib import Path
 from pathlib import PurePath
+import errno
 from os import makedirs, replace
+import shutil
 from datetime import datetime, timedelta
 import sys
 import logging
@@ -232,6 +234,36 @@ def get_output_path(args, config):
     return outputs_directory
 
 
+def get_workbench(args, config):
+    """Local directory where each file is built before it moves to the output path (default ./workbench)."""
+    workbench = args.get('workbench', None)
+    if workbench is None:
+        workbench = config.get('output', {}).get('workbench', 'workbench')
+    return Path(workbench)
+
+
+def deliver(work_file, destination):
+    """Move a complete, closed file from the workbench to its destination.
+
+    The output path may be write-once storage such as pnfs, where a file cannot be edited in place, so
+    files are only ever built in the workbench. The file goes in under a .partial name, written once
+    front to back, and is then renamed: a copy cut short never sits under a real name, where it would
+    count as a window already pulled. Across filesystems the copy carries no metadata (no chmod or
+    utime), which write-once storage may refuse.
+    """
+    partial = Path(f'{destination}.partial')
+    if partial.exists():
+        partial.unlink()  # left by an interrupted copy; write-once storage cannot overwrite it
+    try:
+        replace(work_file, partial)  # same filesystem: a rename
+    except OSError as error:
+        if error.errno != errno.EXDEV:
+            raise
+        shutil.copyfile(work_file, partial)
+        Path(work_file).unlink()
+    replace(partial, destination)
+
+
 def get_output_format(args, config):
     # Try to get the keyword argument from CLI, first
     output_format = args.get('output-format', args.get('output_format', None))
@@ -349,6 +381,8 @@ def get_data(**kwargs):
     if kwargs.get('run-once', kwargs.get('run_once')):
         windows = windows[:1]
 
+    workbench = get_workbench(kwargs, config)
+    makedirs(workbench, exist_ok=True)
     request_list_version = device_list_version.replace('.', '_')
     for start_time in windows:
         end_time = start_time + duration
@@ -361,9 +395,8 @@ def get_data(**kwargs):
         iso_datetime_duration = name_output_file(start_time, duration)
         output_filename = f'{iso_datetime_duration}-{request_list_version}{file_extension}'
         output_path_and_filename = Path(structured_outputs_directory).joinpath(output_filename)
-        # Written beside its destination and renamed when complete: the rename is atomic, and the
-        # .partial name keeps an unfinished file from counting as a window already pulled.
-        partial_path_and_filename = Path(f'{output_path_and_filename}.partial')
+        # Built and closed in the local workbench, then delivered (see deliver()).
+        work_file = workbench.joinpath(output_filename)
         logger.debug('Output path and filename is: %s', output_path_and_filename)
 
         logger.info('Calling dpm_data.main...')
@@ -373,14 +406,14 @@ def get_data(**kwargs):
             start_time,
             end_time,
             requests_list,
-            partial_path_and_filename
+            work_file
         )
         dpm_data.get_data(
             start_date=start_time,
             end_date=end_time,
             device_file=requests_list,
-            output_file=partial_path_and_filename,
+            output_file=work_file,
             output_format=output_format,
             debug=True
         )
-        replace(partial_path_and_filename, output_path_and_filename)
+        deliver(work_file, output_path_and_filename)
