@@ -92,8 +92,8 @@ def main():
         '--output-format',
         type=str,
         choices=list(IMPLEMENTED_OUTPUT_FORMATS.keys()),
-        default='hdf5',
-        help='Output file format (default: hdf5).'
+        default=None,  # no default here, or it would always override output.format in config.yaml
+        help='Output file format (default: output.format in config.yaml, else hdf5).'
     )
     dump_parser.add_argument(
         '-i',

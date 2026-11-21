@@ -4,10 +4,9 @@
 from glob import glob
 from pathlib import Path
 from pathlib import PurePath
-from os import makedirs
-from datetime import datetime
+from os import makedirs, replace
+from datetime import datetime, timedelta
 import sys
-import shutil
 import logging
 from logging.handlers import RotatingFileHandler
 import signal
@@ -107,21 +106,6 @@ def parse_iso(date_time_duration_str):
 
     return start_time, duration
 
-# Return a tuple (start_time, duration)
-def get_start_time_config(args, config):
-    # Try to get the keyword argument from CLI, first
-    start_time = args.get('start-time', args.get('start_time', None))
-
-    # Determine input to use for output configuration
-    if start_time is None and 'start' in config.keys():
-        try:
-            start_time = config['start']
-        except KeyError:
-            logger.debug('Config does not contain "start".')
-            return None
-
-    return parse_iso(start_time)
-
 
 def get_duration_config(args, config):
     # Try to get the keyword argument from CLI, first
@@ -129,75 +113,56 @@ def get_duration_config(args, config):
 
     # Determine input to use for output configuration
     if duration is None and 'duration' in config.keys():
+        duration = config['duration']
+
+    return isodate.parse_duration(f'P{duration}') if duration is not None else None
+
+
+def get_configured_start(args, config):
+    """The start from --start-time or the config file, or None. A config string may carry its own
+    duration (20200101T000000PT1H); YAML may hand over a datetime already."""
+    start = args.get('start-time', args.get('start_time', None))
+    if start is None:
+        start = config.get('start')
+    if start is None or isinstance(start, datetime):
+        return start, None
+    if 'P' not in str(start):  # a plain start is normal here; parse_iso would warn about it
+        return isodate.parse_datetime(str(start)), None
+    return parse_iso(str(start))
+
+
+def existing_windows(output_path, file_extension):
+    """(start, duration) of every window that already has a file under output_path, in any
+    request-list version. Unfinished files end in .partial, so they never count."""
+    have = set()
+    pattern = Path(output_path).joinpath('**', f'*{file_extension}')
+    for path in glob(str(pattern), recursive=True):
+        name = PurePath(path).name.split('-')[0]
+        if 'P' not in name:
+            continue
         try:
-            duration = config["duration"]
-        except KeyError:
-            logger.debug('Config does not contain "duration".')
-            return None
-
-    return isodate.parse_duration(f'P{duration}')
-
-# Paths for `get_start_time`:
-#     No time constraints with no files
-#     No time constraints with files
-#     Time constraints with no files
-#     Time constraints with files
-
-
-def get_start_time(output_path, args, config, output_format='hdf5'):
-    start_time, _ = get_start_time_config(args, config)
-    duration = get_duration_config(args, config)
-
-    file_extension = OUTPUT_FORMATS[output_format]
-    outputs_pattern = output_path.joinpath('**', f'*{file_extension}')
-    # Glob allows the use of the * wildcard
-    file_paths = glob(str(outputs_pattern), recursive=True)
-    files = list(map(lambda path: PurePath(path).name, file_paths))
-    # Sort modifies the list in place
-    files.sort()
-
-    while len(files) > 0:
-        try:
-            most_recent_filename = PurePath(files[-1]).name
-            date_time_duration_str = most_recent_filename.split('-')[0]
-            file_start_time, file_duration = parse_iso(date_time_duration_str)
-            logger.debug('Parsed duration: %s', file_duration)
-            break
+            have.add(parse_iso(name))
         except ValueError:
-            logger.debug(
-                'Ignoring %s for calculating start time.',
-                files[-1]
-            )
-            files.pop()
+            logger.debug('Ignoring %s: not a nanny file name.', path)
+    return have
 
-    try:
-        if file_start_time > start_time:
-            start_time = file_start_time + file_duration
-    except NameError:
-        if start_time is None:
-            logger.error('Cannot determine start time.')
-            raise
-        else:
-            logger.debug('`file_start_time` is undefined')
-    except TypeError:
-        start_time = file_start_time
 
-    # This means the config didn't have a duration specified.
-    if duration is None:
-        # First try to get duration from file
-        try:
-            duration = file_duration
-        except NameError:
-            logger.debug('`file_duration` is undefined')
-            # Otherwise, get the duration from the `start_time` or default.
-            _, duration = parse_iso(start_time)
+def last_whole_window(now, duration):
+    """Start of the newest window that has ended, counting windows from midnight."""
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight + ((now - midnight) // duration - 1) * duration
 
-    end_time = start_time + duration
-    logger.debug('Calculated end time: %s', end_time)
-    logger.debug('Start time, end time, and duration are %s, %s, and %s',
-                 start_time, end_time, duration)
 
-    return start_time, duration
+def missing_windows(start_time, duration, now, have):
+    """Every whole window from start_time to now without a file, newest first: during a long
+    backfill the latest hours land first, so the archive stays current while older holes fill."""
+    windows = []
+    window = start_time
+    while window + duration <= now:
+        if (window, duration) not in have:
+            windows.append(window)
+        window += duration
+    return windows[::-1]
 
 
 def name_output_file(start_time, duration=None):
@@ -369,35 +334,37 @@ def get_data(**kwargs):
     output_format = get_output_format(kwargs, config)
     file_extension = OUTPUT_FORMATS[output_format]
 
-    # get_start_time always returns
-    start_time, duration = get_start_time(outputs_directory, kwargs, config, output_format)
-    end_time = start_time + duration
+    now = datetime.now()
+    configured_start, start_duration = get_configured_start(kwargs, config)
+    duration = get_duration_config(kwargs, config) or start_duration or timedelta(hours=1)
+    have = existing_windows(outputs_directory, file_extension)
+    # With no configured start, fill back to the earliest file already written, or else pull only
+    # the newest whole window.
+    start_time = configured_start or min(
+        (start for start, length in have if length == duration),
+        default=last_whole_window(now, duration)
+    )
+    windows = missing_windows(start_time, duration, now, have)
+    logger.info('%s window(s) to pull since %s', len(windows), start_time)
+    if kwargs.get('run-once', kwargs.get('run_once')):
+        windows = windows[:1]
 
-    continue_loop = True
-
-    while datetime.now() > end_time and continue_loop:
+    request_list_version = device_list_version.replace('.', '_')
+    for start_time in windows:
+        end_time = start_time + duration
         structured_outputs_directory = create_structured_path(
             outputs_directory,
             start_time
         )
-        logger.debug('Structured path is: %s', structured_outputs_directory)
+        makedirs(structured_outputs_directory, exist_ok=True)
 
-        iso_datetime_duration = name_output_file(
-            start_time,
-            duration
-        )
-        logger.debug('Named the output file: %s', iso_datetime_duration)
-
-        request_list_version = device_list_version.replace('.', '_')
+        iso_datetime_duration = name_output_file(start_time, duration)
         output_filename = f'{iso_datetime_duration}-{request_list_version}{file_extension}'
-        temp_path_and_filename = Path('.').joinpath(output_filename)
-        output_path_and_filename = Path(
-            structured_outputs_directory
-        ).joinpath(output_filename)
-        logger.debug(
-            'Output path and filename is: %s',
-            output_path_and_filename
-        )
+        output_path_and_filename = Path(structured_outputs_directory).joinpath(output_filename)
+        # Written beside its destination and renamed when complete: the rename is atomic, and the
+        # .partial name keeps an unfinished file from counting as a window already pulled.
+        partial_path_and_filename = Path(f'{output_path_and_filename}.partial')
+        logger.debug('Output path and filename is: %s', output_path_and_filename)
 
         logger.info('Calling dpm_data.main...')
         logger.debug(
@@ -406,26 +373,14 @@ def get_data(**kwargs):
             start_time,
             end_time,
             requests_list,
-            temp_path_and_filename
+            partial_path_and_filename
         )
-        # Begin data request and writing to local file
         dpm_data.get_data(
             start_date=start_time,
             end_date=end_time,
             device_file=requests_list,
-            output_file=temp_path_and_filename,
+            output_file=partial_path_and_filename,
             output_format=output_format,
             debug=True
         )
-
-        # Ensure that the folders exist
-        if not structured_outputs_directory.exists():
-            makedirs(structured_outputs_directory, exist_ok=True)
-
-        # Move local closed file to final destination
-        shutil.move(temp_path_and_filename, output_path_and_filename)
-        start_time = end_time
-        end_time = start_time + duration
-
-        # Check if should continue
-        continue_loop = not kwargs.get('run-once', kwargs.get('run_once'))
+        replace(partial_path_and_filename, output_path_and_filename)

@@ -78,11 +78,11 @@ class TestClass:
             with _open_output(output_file, 'csv'):
                 pass
 
-    def test_open_output_parquet_not_implemented(self, tmp_path):
+    def test_open_output_parquet_writes_empty_table(self, tmp_path):
         output_file = tmp_path / 'test.parquet'
-        with pytest.raises(NotImplementedError):
-            with _open_output(output_file, 'parquet'):
-                pass
+        with _open_output(output_file, 'parquet'):
+            pass
+        assert list(pd.read_parquet(output_file).columns) == ['device', 'Timestamps', 'Data']
 
     def test_open_output_unknown_format_raises_value_error(self, tmp_path):
         output_file = tmp_path / 'test.xyz'

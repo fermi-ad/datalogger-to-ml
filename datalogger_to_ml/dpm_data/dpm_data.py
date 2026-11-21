@@ -24,6 +24,7 @@ OUTPUT_FORMATS = {
 
 IMPLEMENTED_OUTPUT_FORMATS = {
     'hdf5': '.h5',
+    'parquet': '.parquet',
 }
 
 # Set the pacsys log to DEBUG
@@ -132,11 +133,49 @@ def _read_logger(device_list, store, data_source, dpm_host=None,
     compare_device_list(store.keys(), device_list, status_replies)
 
 
+class _ParquetStore:
+    """Collects each device's frame the way HDFStore.append does, then writes one long table.
+
+    Columns: device, Timestamps (microseconds), Data. Long, not one column per device, because
+    devices carry their own timestamps; aligning them is left to whoever reads the file. An array
+    device becomes one device[i] series per element.
+    """
+
+    def __init__(self):
+        self.frames = {}
+
+    def append(self, key, frame):
+        self.frames[key] = pd.concat([self.frames[key], frame]) if key in self.frames else frame
+
+    def keys(self):
+        return list(self.frames)
+
+    def table(self):
+        parts = []
+        for device, frame in self.frames.items():
+            for column in frame.columns.drop('Timestamps'):
+                name = device if column == 'Data' else f'{device}{column[4:]}'
+                parts.append(pd.DataFrame({
+                    'device': name,
+                    'Timestamps': frame['Timestamps'].to_numpy(dtype='int64'),
+                    'Data': frame[column].to_numpy(dtype=float),
+                }))
+        if not parts:
+            return pd.DataFrame({'device': pd.Series(dtype=str),
+                                 'Timestamps': pd.Series(dtype='int64'),
+                                 'Data': pd.Series(dtype=float)})
+        return pd.concat(parts, ignore_index=True)
+
+
 @contextmanager
 def _open_output(output_file, output_format):
     if output_format == 'hdf5':
         with pd.HDFStore(output_file) as store:
             yield store
+    elif output_format == 'parquet':
+        store = _ParquetStore()
+        yield store
+        store.table().to_parquet(output_file, index=False)
     elif output_format in OUTPUT_FORMATS:
         raise NotImplementedError(
             f'Output format {output_format!r} is not yet implemented.'
