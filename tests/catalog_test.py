@@ -82,3 +82,19 @@ def test_reruns_skip_unchanged_reindex_changed_drop_deleted(tree, tmp_path, caps
 def test_creates_the_database_directory(tree, tmp_path):
     catalog.build(catalog_path=tree, db=tmp_path / 'new' / 'dir' / 'cat.sqlite')
     assert (tmp_path / 'new' / 'dir' / 'cat.sqlite').exists()
+
+
+def test_millisecond_stamps_are_corrected(tmp_path, monkeypatch):
+    """Status channels arrive stamped in milliseconds; the catalog reads them as the times they are."""
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / 'out'
+    out.mkdir()
+    start = 1_763_000_000  # Unix seconds, November 2025
+    pd.DataFrame({'device': ['A:ONE', 'A:ONE', 'S:ST.STATUS.ON', 'S:ST.STATUS.ON'],
+                  'Timestamps': [start * 1_000_000, (start + 1) * 1_000_000, start * 1000, (start + 2) * 1000],
+                  'Data': [1.0, 2.0, 0.0, 1.0]}).to_parquet(out / 'w.parquet', index=False)
+    catalog.build(catalog_path=out, db=tmp_path / 'cat.sqlite')
+    db = _db(tmp_path)
+    st = db.execute("SELECT * FROM device_stats WHERE device = 'S:ST.STATUS.ON'").fetchone()
+    assert (st['first_ts'], st['dt_mean']) == (start, 2.0)
+    assert db.execute('SELECT data_start FROM files').fetchone()[0] == start

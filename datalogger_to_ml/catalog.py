@@ -79,8 +79,19 @@ def device_frames(path):
         return {key.lstrip('/'): store[key] for key in store.keys()}
 
 
+# Stamps are microseconds, but pacsys returns some channels' logger stamps in milliseconds (digital status
+# channels such as C:*.STATUS.ON). Below 1e15 a microsecond stamp would predate September 2001, so any such
+# stamp is taken as milliseconds.
+MICROSECOND_FLOOR = 1e15
+
+
+def stamps_in_seconds(timestamps):
+    stamps = np.asarray(timestamps, dtype='int64')
+    return np.where(stamps < MICROSECOND_FLOOR, stamps * 1000, stamps) / 1e6
+
+
 def device_row(request, frame, window_seconds):
-    times = np.sort(frame['Timestamps'].to_numpy(dtype='int64')) / 1e6
+    times = np.sort(stamps_in_seconds(frame['Timestamps']))
     values = frame['Data'].dropna()
     quartiles = values.quantile([0, .25, .5, .75, 1]).tolist() if len(values) else [None] * 5
     steps = np.diff(times)
