@@ -7,6 +7,7 @@ import isodate
 from . import h5_dump
 from . import nanny
 from . import h5_validator
+from . import catalog
 from .dpm_data.dpm_data import IMPLEMENTED_OUTPUT_FORMATS
 
 # https://packaging.python.org/guides/single-sourcing-package-version/#single-sourcing-the-version
@@ -58,6 +59,22 @@ def main():
         help='Validate output file contents'
     )
     validate_parser.set_defaults(func=h5_validator.validate)
+    catalog_parser = subparsers.add_parser(
+        'catalog',
+        help='Index output files and per-device statistics in an SQLite catalog'
+    )
+    catalog_parser.set_defaults(func=catalog.build)
+    catalog_parser.add_argument(
+        'catalog-path',
+        nargs='?',
+        type=Path,
+        help='Directory of nanny output (default: output.path in config.yaml).'
+    )
+    catalog_parser.add_argument(
+        '--db',
+        type=Path,
+        help='SQLite catalog file (default: catalog in config.yaml, else catalog.sqlite); keep it on local disk.'
+    )
 
     # sub-command arguments
     nanny_parser.add_argument(

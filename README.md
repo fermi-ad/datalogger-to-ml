@@ -83,6 +83,26 @@ The `--run-once` flag disables the "get data to now" feature.
 
 The `validate` sub-command is a simple program that takes a path and checks that every `*.h5` and `*.parquet` file under it, subfolders included, can be read.
 
+### Catalog
+
+The `catalog` sub-command indexes output files in an SQLite database: one row per file (path, name, size,
+modified time, nominal window from the file name, actual data span, request-list version, number of devices)
+and one row per device in each file (request, bare device name, point count, points per second, first and last
+sample time, min, 25%, median, 75%, max of the values, and the mean and variance of the intervals between
+consecutive samples). Each run indexes only new or changed files and drops entries for files that are gone.
+
+`datalogger-to-ml catalog [PATH] [--db FILE]`: PATH defaults to `output.path` and FILE to `catalog` in
+`config.yaml`, else `catalog.sqlite`. SQLite needs no server or open port; keep the database on local disk, not
+on NFS or pnfs. Run it after `nanny` under the same lock, so it has one writer. Example queries:
+
+```sql
+-- files where a device's range overlapped [V1, V2]; for a continuous signal, it took those values
+SELECT f.path FROM files f JOIN device_stats d ON d.file_id = f.id
+ WHERE d.device = 'C:5LL80H' AND d.v_max >= 16.9 AND d.v_min <= 17.0;
+-- files with a device below one point per second
+SELECT count(*) FROM device_stats WHERE device = 'C:5PT81H' AND points_per_s < 1;
+```
+
 ### Dump
 
 The `dump` sub-command is a simple program that takes an hdf5 input file via the `-i` or `--input-file` flags and outputs a truncated text representation, `dump_output.txt`, of the data in the input file.
