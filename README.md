@@ -94,9 +94,9 @@ consecutive samples, and `n_outside_window`, the samples whose time lies outside
 an older version is rebuilt on its next run.
 
 Stamps are written in microseconds. For each device the nanny picks the unit (microseconds, milliseconds,
-seconds, or nanoseconds) that puts its stamps inside the requested window, and logs a warning when it rescales:
+seconds, or nanoseconds) that puts its stamps inside the requested window, and logs the rescaling at INFO:
 the digital status channels (`*.STATUS.ON`) arrive in milliseconds. Stamps that fit no unit are written as
-received, never dropped, and logged; `n_outside_window` finds them afterwards:
+received, never dropped, and logged as a warning; `n_outside_window` finds them afterwards:
 
 ```sql
 SELECT f.path, d.request, d.n_outside_window FROM device_stats d JOIN files f ON f.id = d.file_id

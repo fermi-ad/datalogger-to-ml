@@ -154,8 +154,9 @@ def _reading_to_frame(reading, window_us=None, request=None):
 
     pacsys joins the logger's reply chunks into one timed array. Array devices give one row per
     record, with a Data[i] column per element. Returns None when the reading carries no data.
-    Stamps go through to_microseconds; a rescaling, and stamps outside the window, are logged as
-    warnings, and every point is kept.
+    Stamps go through to_microseconds and every point is kept. A rescaling that fits is logged at INFO,
+    since the status channels need one on every read until the cause is fixed; stamps outside the
+    window are logged as a warning.
     """
     if not reading.ok or reading.value_type != ValueType.TIMED_SCALAR_ARRAY:
         return None
@@ -163,7 +164,7 @@ def _reading_to_frame(reading, window_us=None, request=None):
     micros, unit, n_outside = to_microseconds(reading.value['micros'], window_us)
     name = request or reading.drf
     if unit != 'us':
-        logger.warning('%s: logger stamps arrived in %s; converted to microseconds', name, unit)
+        logger.info('%s: logger stamps arrived in %s; converted to microseconds', name, unit)
     if n_outside:
         logger.warning('%s: %d of %d stamps fall outside the requested window; written as received',
                        name, n_outside, len(micros))
