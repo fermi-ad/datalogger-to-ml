@@ -31,6 +31,7 @@ import sqlite3
 import numpy as np
 import pandas as pd
 
+from .dpm_data.dpm_data import as_microseconds
 from .nanny import load_config, parse_iso
 
 SCHEMA = """
@@ -79,19 +80,8 @@ def device_frames(path):
         return {key.lstrip('/'): store[key] for key in store.keys()}
 
 
-# Stamps are microseconds, but pacsys returns some channels' logger stamps in milliseconds (digital status
-# channels such as C:*.STATUS.ON). Below 1e15 a microsecond stamp would predate September 2001, so any such
-# stamp is taken as milliseconds.
-MICROSECOND_FLOOR = 1e15
-
-
-def stamps_in_seconds(timestamps):
-    stamps = np.asarray(timestamps, dtype='int64')
-    return np.where(stamps < MICROSECOND_FLOOR, stamps * 1000, stamps) / 1e6
-
-
 def device_row(request, frame, window_seconds):
-    times = np.sort(stamps_in_seconds(frame['Timestamps']))
+    times = np.sort(as_microseconds(frame['Timestamps'])) / 1e6  # files written before 1.6.3 may hold ms
     values = frame['Data'].dropna()
     quartiles = values.quantile([0, .25, .5, .75, 1]).tolist() if len(values) else [None] * 5
     steps = np.diff(times)

@@ -89,6 +89,17 @@ def _with_source(request, data_source):
     return request if '<-' in request else f'{request}<-{data_source}'
 
 
+# pacsys 0.3.0 returns some channels' logger stamps in milliseconds, not microseconds (digital status
+# channels such as C:*.STATUS.ON). Below 1e15 a microsecond stamp would predate September 2001, so any such
+# stamp is taken as milliseconds.
+MICROSECOND_FLOOR = 10**15
+
+
+def as_microseconds(stamps):
+    stamps = np.asarray(stamps, dtype='int64')
+    return np.where(stamps < MICROSECOND_FLOOR, stamps * 1000, stamps)
+
+
 def _reading_to_frame(reading):
     """Turn a pacsys logger reading into a frame of Timestamps (microseconds) and Data.
 
@@ -98,7 +109,7 @@ def _reading_to_frame(reading):
     if not reading.ok or reading.value_type != ValueType.TIMED_SCALAR_ARRAY:
         return None
     data = np.asarray(reading.value['data'])
-    micros = np.asarray(reading.value['micros'])
+    micros = as_microseconds(reading.value['micros'])
     if data.ndim == 2:
         frame = pd.DataFrame(data, columns=[f'Data[{i}]' for i in range(data.shape[1])])
         frame.insert(0, 'Timestamps', micros)

@@ -107,10 +107,13 @@ def _timed(drf, data, micros):
 def test_reading_to_frame():
     from pacsys.types import Reading
     from datalogger_to_ml.dpm_data.dpm_data import _reading_to_frame
-    scalar = _reading_to_frame(_timed('A', [1.0, 2.0, 3.0], [10, 20, 30]))
+    t0 = 1_763_000_000_000_000  # microseconds, November 2025
+    scalar = _reading_to_frame(_timed('A', [1.0, 2.0, 3.0], [t0, t0 + 10, t0 + 20]))
     assert list(scalar.columns) == ['Timestamps', 'Data']
-    assert list(scalar['Data']) == [1.0, 2.0, 3.0] and list(scalar['Timestamps']) == [10, 20, 30]
-    array = _reading_to_frame(_timed('B', [[1, 2], [3, 4]], [10, 20]))
+    assert list(scalar['Data']) == [1.0, 2.0, 3.0] and list(scalar['Timestamps']) == [t0, t0 + 10, t0 + 20]
+    status = _reading_to_frame(_timed('S.STATUS.ON', [1.0], [t0 // 1000]))  # pacsys stamps these in ms
+    assert list(status['Timestamps']) == [t0]
+    array = _reading_to_frame(_timed('B', [[1, 2], [3, 4]], [t0, t0 + 10]))
     assert list(array.columns) == ['Timestamps', 'Data[0]', 'Data[1]'] and list(array['Data[1]']) == [2, 4]
     assert _reading_to_frame(Reading(drf='C', error_code=-6, message='no such device')) is None
 
