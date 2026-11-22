@@ -128,6 +128,7 @@ def index_file(db, path):
 
 
 def open_db(db_path):
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(db_path)
     db.execute('PRAGMA foreign_keys = ON')
     db.executescript(SCHEMA)

@@ -77,3 +77,8 @@ def test_reruns_skip_unchanged_reindex_changed_drop_deleted(tree, tmp_path, caps
     db = _db(tmp_path)
     assert db.execute('SELECT min(first_ts) FROM device_stats').fetchone()[0] == 10.0
     assert db.execute('SELECT count(*) FROM device_stats').fetchone()[0] == 2  # the deleted file's rows went with it
+
+
+def test_creates_the_database_directory(tree, tmp_path):
+    catalog.build(catalog_path=tree, db=tmp_path / 'new' / 'dir' / 'cat.sqlite')
+    assert (tmp_path / 'new' / 'dir' / 'cat.sqlite').exists()
