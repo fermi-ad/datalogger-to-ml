@@ -88,8 +88,20 @@ The `validate` sub-command is a simple program that takes a path and checks that
 The `catalog` sub-command indexes output files in an SQLite database: one row per file (path, name, size,
 modified time, nominal window from the file name, actual data span, request-list version, number of devices)
 and one row per device in each file (request, bare device name, point count, points per second, first and last
-sample time, min, 25%, median, 75%, max of the values, and the mean and variance of the intervals between
-consecutive samples). Each run indexes only new or changed files and drops entries for files that are gone.
+sample time, min, 25%, median, 75%, max of the values, the mean and variance of the intervals between
+consecutive samples, and `n_outside_window`, the samples whose time lies outside the file's window by more than
+5 s). Each run indexes only new or changed files and drops entries for files that are gone. A catalog built by
+an older version is rebuilt on its next run.
+
+Stamps are written in microseconds. For each device the nanny picks the unit (microseconds, milliseconds,
+seconds, or nanoseconds) that puts its stamps inside the requested window, and logs a warning when it rescales:
+the digital status channels (`*.STATUS.ON`) arrive in milliseconds. Stamps that fit no unit are written as
+received, never dropped, and logged; `n_outside_window` finds them afterwards:
+
+```sql
+SELECT f.path, d.request, d.n_outside_window FROM device_stats d JOIN files f ON f.id = d.file_id
+ WHERE d.n_outside_window > 0;
+```
 
 `datalogger-to-ml catalog [PATH] [--db FILE]`: PATH defaults to `output.path` and FILE to `catalog` in
 `config.yaml`, else `catalog.sqlite`. SQLite needs no server or open port; keep the database on local disk, not

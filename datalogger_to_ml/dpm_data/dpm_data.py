@@ -6,6 +6,7 @@ import logging
 import sys
 import warnings
 import os
+import re
 from contextlib import contextmanager
 from pathlib import Path
 import signal
@@ -89,27 +90,83 @@ def _with_source(request, data_source):
     return request if '<-' in request else f'{request}<-{data_source}'
 
 
-# pacsys 0.3.0 returns some channels' logger stamps in milliseconds, not microseconds (digital status
-# channels such as C:*.STATUS.ON). Below 1e15 a microsecond stamp would predate September 2001, so any such
-# stamp is taken as milliseconds.
+# Some channels' logger stamps arrive in milliseconds, not the microseconds pacsys labels them (digital
+# status channels such as C:*.STATUS.ON, through pacsys 0.3.0); whether the logger, DPM, or pacsys does it is
+# not known. Below 1e15 a microsecond stamp would predate September 2001, so with no window to judge by, any
+# such stamp is taken as milliseconds.
 MICROSECOND_FLOOR = 10**15
 
 
 def as_microseconds(stamps):
+    """Fallback when no window is known: stamps below MICROSECOND_FLOOR are taken as milliseconds."""
     stamps = np.asarray(stamps, dtype='int64')
     return np.where(stamps < MICROSECOND_FLOOR, stamps * 1000, stamps)
 
 
-def _reading_to_frame(reading):
+# Units a device's stamps may arrive in, as (name, multiplier to microseconds), tried in this order; the
+# first wins a tie, so stamps that fit as microseconds are never rescaled.
+STAMP_UNITS = (('us', 1), ('ms', 1000), ('s', 1_000_000), ('ns', 1e-3))
+# Stamps may sit a little outside the requested window: in the first CMTF catch-up they lay within 1 s of
+# its edges, and 5 s leaves margin. Untested beyond that.
+WINDOW_SLACK_US = 5_000_000
+
+
+def outside_window(micros, window_us, slack_us=WINDOW_SLACK_US):
+    """Boolean mask of stamps (microseconds) outside the window [start, end), widened by slack."""
+    start, end = window_us
+    micros = np.asarray(micros)
+    return (micros < start - slack_us) | (micros >= end + slack_us)
+
+
+def to_microseconds(stamps, window_us):
+    """One device's stamps in microseconds, the unit chosen by the requested window.
+
+    Tries each of STAMP_UNITS and keeps the one that puts the most stamps inside the window, so
+    milliseconds (the status channels), seconds, and nanoseconds are all caught. One unit per device,
+    since a device's stamps all arrive through the same reply. Nothing is dropped: when no unit puts
+    any stamp inside the window, the stamps are kept as received, for diagnosis, and the catalog counts
+    stamps outside the window per device (n_outside_window).
+
+    Returns (micros, unit, n_outside). With no window (window_us None), falls back to as_microseconds.
+    """
+    stamps = np.asarray(stamps, dtype='int64')
+    if window_us is None:
+        return as_microseconds(stamps), 'us', 0
+    best = None
+    for unit, factor in STAMP_UNITS:
+        micros = stamps if factor == 1 else np.round(stamps * factor).astype('int64')
+        n_outside = int(outside_window(micros, window_us).sum())
+        if best is None or n_outside < best[2]:
+            best = (micros, unit, n_outside)
+    if len(stamps) and best[2] == len(stamps):  # no unit fits any stamp: keep them as received
+        return stamps, 'us', len(stamps)
+    return best
+
+
+def window_of_source(data_source):
+    """The requested window in microseconds from LOGGER:start_ms:end_ms; None for any other source."""
+    match = re.fullmatch(r'LOGGER:(\d+):(\d+)', data_source or '')
+    return (int(match[1]) * 1000, int(match[2]) * 1000) if match else None
+
+
+def _reading_to_frame(reading, window_us=None, request=None):
     """Turn a pacsys logger reading into a frame of Timestamps (microseconds) and Data.
 
     pacsys joins the logger's reply chunks into one timed array. Array devices give one row per
     record, with a Data[i] column per element. Returns None when the reading carries no data.
+    Stamps go through to_microseconds; a rescaling, and stamps outside the window, are logged as
+    warnings, and every point is kept.
     """
     if not reading.ok or reading.value_type != ValueType.TIMED_SCALAR_ARRAY:
         return None
     data = np.asarray(reading.value['data'])
-    micros = as_microseconds(reading.value['micros'])
+    micros, unit, n_outside = to_microseconds(reading.value['micros'], window_us)
+    name = request or reading.drf
+    if unit != 'us':
+        logger.warning('%s: logger stamps arrived in %s; converted to microseconds', name, unit)
+    if n_outside:
+        logger.warning('%s: %d of %d stamps fall outside the requested window; written as received',
+                       name, n_outside, len(micros))
     if data.ndim == 2:
         frame = pd.DataFrame(data, columns=[f'Data[{i}]' for i in range(data.shape[1])])
         frame.insert(0, 'Timestamps', micros)
@@ -126,9 +183,10 @@ def _read_logger(device_list, store, data_source, dpm_host=None,
         readings = backend.get_many(drfs, timeout=timeout)
     logger.info('Data acquisition complete')
 
+    window_us = window_of_source(data_source)
     status_replies = []
     for request, reading in zip(device_list, readings):
-        frame = _reading_to_frame(reading)
+        frame = _reading_to_frame(reading, window_us, request)
         if frame is not None and len(frame):
             store.append(request, frame)
         if not reading.ok:

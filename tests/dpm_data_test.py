@@ -151,3 +151,65 @@ def test_read_logger_writes_each_device(monkeypatch):
     assert asked['timeout'] == dpm_data.DEFAULT_TIMEOUT
     assert list(store) == ['A:GOOD'] and list(store['A:GOOD']['Data']) == [1.0, 2.0]
     assert calls == [(['A:GOOD'], [True, 'no such device'])]
+
+
+T0_US = 1_795_284_000_000_000  # 2026-11-21 18:00 UTC, in microseconds
+HOUR_US = 3_600_000_000
+WINDOW = (T0_US, T0_US + HOUR_US)
+
+
+@pytest.mark.parametrize('unit, factor', [('us', 1), ('ms', 1e-3), ('s', 1e-6), ('ns', 1e3)])
+def test_to_microseconds_picks_the_unit_the_window_fits(unit, factor):
+    """Stamps in any of the four units come back in microseconds, the unit named."""
+    import numpy as np
+    from datalogger_to_ml.dpm_data.dpm_data import to_microseconds
+    micros = T0_US + np.arange(0, HOUR_US, 1_000_000)
+    stamps = np.round(micros * factor).astype('int64')
+    out, found, n_outside = to_microseconds(stamps, WINDOW)
+    assert found == unit and n_outside == 0
+    assert np.abs(out - micros).max() <= (1_000_000 if unit == 's' else 1)
+
+
+def test_to_microseconds_keeps_stamps_no_unit_fits():
+    """A reply for the wrong day fits no unit: kept as received, every stamp counted outside."""
+    import numpy as np
+    from datalogger_to_ml.dpm_data.dpm_data import to_microseconds
+    stamps = np.array([T0_US - 86_400_000_000, T0_US - 86_399_000_000])
+    out, found, n_outside = to_microseconds(stamps, WINDOW)
+    assert found == 'us' and n_outside == 2 and list(out) == list(stamps)
+
+
+def test_to_microseconds_counts_strays_without_rescaling():
+    """One stray stamp among good ones: the unit stays microseconds and the stray is kept, and counted."""
+    from datalogger_to_ml.dpm_data.dpm_data import to_microseconds
+    stamps = [T0_US, T0_US + 1_000_000, T0_US + 2 * HOUR_US]
+    out, found, n_outside = to_microseconds(stamps, WINDOW)
+    assert found == 'us' and n_outside == 1 and list(out) == stamps
+
+
+def test_to_microseconds_slack_and_no_window():
+    from datalogger_to_ml.dpm_data.dpm_data import WINDOW_SLACK_US, to_microseconds
+    edge = [T0_US - WINDOW_SLACK_US + 1, T0_US + HOUR_US + WINDOW_SLACK_US - 1]
+    assert to_microseconds(edge, WINDOW)[2] == 0
+    out, found, n_outside = to_microseconds([T0_US // 1000], None)  # no window: the 1e15 floor decides
+    assert list(out) == [T0_US] and (found, n_outside) == ('us', 0)
+
+
+def test_window_of_source():
+    from datalogger_to_ml.dpm_data.dpm_data import window_of_source
+    assert window_of_source('LOGGER:1795284000000:1795287600000') == WINDOW
+    assert window_of_source('LOGGERDURATION:3600000') is None
+    assert window_of_source(None) is None
+
+
+def test_reading_to_frame_converts_and_warns(caplog):
+    """A millisecond device is converted; an out-of-window device is written anyway; both are logged."""
+    from datalogger_to_ml.dpm_data.dpm_data import _reading_to_frame
+    status = _reading_to_frame(_timed('S:X.STATUS.ON', [0.0, 1.0], [T0_US // 1000, T0_US // 1000 + 1000]),
+                               WINDOW, 'S:X.STATUS.ON@P,1000,true')
+    assert list(status['Timestamps']) == [T0_US, T0_US + 1_000_000]
+    stray = _reading_to_frame(_timed('A', [1.0, 2.0], [T0_US, T0_US + 2 * HOUR_US]), WINDOW, 'A@P,1000,true')
+    assert list(stray['Timestamps']) == [T0_US, T0_US + 2 * HOUR_US] and list(stray['Data']) == [1.0, 2.0]
+    messages = [r.getMessage() for r in caplog.records]
+    assert 'S:X.STATUS.ON@P,1000,true: logger stamps arrived in ms; converted to microseconds' in messages
+    assert 'A@P,1000,true: 1 of 2 stamps fall outside the requested window; written as received' in messages

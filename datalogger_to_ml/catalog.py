@@ -13,6 +13,15 @@ Statistics, per device and file:
   pandas computes them).
 - dt_mean, dt_var: mean and population variance (ddof=0) of the intervals between consecutive sample
   times, in seconds, after sorting by time.
+- n_outside_window: samples whose time falls outside the file's nominal window, widened by 5 s
+  (dpm_data.WINDOW_SLACK_US); NULL when the file name gives no window. Nonzero marks stamps the nanny
+  kept as received because no unit fit them (a wrong unit, or a reply for another time), so a query
+  finds them without anything being dropped. Times are read in the unit the window picks
+  (dpm_data.to_microseconds), so millisecond stamps in files written before 1.6.3 count as the
+  times they are, not as outside.
+
+The schema has a version (PRAGMA user_version). A catalog of an older version is emptied and rebuilt
+on the next run, since its rows lack columns the new code fills.
 
 Example queries:
     -- files where device X's range overlapped [V1, V2] (for a continuous signal, it took those values)
@@ -31,7 +40,7 @@ import sqlite3
 import numpy as np
 import pandas as pd
 
-from .dpm_data.dpm_data import as_microseconds
+from .dpm_data.dpm_data import outside_window, to_microseconds
 from .nanny import load_config, parse_iso
 
 SCHEMA = """
@@ -58,12 +67,15 @@ CREATE TABLE IF NOT EXISTS device_stats (
     first_ts REAL, last_ts REAL,
     v_min REAL, v_q25 REAL, v_median REAL, v_q75 REAL, v_max REAL,
     dt_mean REAL, dt_var REAL,
+    n_outside_window INTEGER,            -- samples outside the nominal window (+-5 s); NULL if none known
     PRIMARY KEY (file_id, request)
 );
 CREATE INDEX IF NOT EXISTS device_stats_by_device ON device_stats (device, v_min, v_max);
 CREATE INDEX IF NOT EXISTS device_stats_by_rate ON device_stats (device, points_per_s);
 CREATE INDEX IF NOT EXISTS files_by_window ON files (window_start);
 """
+# Raise with any change to SCHEMA; open_db rebuilds catalogs of an older version.
+SCHEMA_VERSION = 2
 
 
 def bare_device(request):
@@ -80,8 +92,13 @@ def device_frames(path):
         return {key.lstrip('/'): store[key] for key in store.keys()}
 
 
-def device_row(request, frame, window_seconds):
-    times = np.sort(as_microseconds(frame['Timestamps'])) / 1e6  # files written before 1.6.3 may hold ms
+def device_row(request, frame, window):
+    """One device_stats row (without file_id); window is (start, end) in Unix seconds, or None."""
+    window_us = (round(window[0] * 1e6), round(window[1] * 1e6)) if window else None
+    micros, _, _ = to_microseconds(frame['Timestamps'], window_us)  # files before 1.6.3 may hold ms
+    n_outside = int(outside_window(micros, window_us).sum()) if window_us else None
+    times = np.sort(micros) / 1e6
+    window_seconds = window[1] - window[0] if window else None
     values = frame['Data'].dropna()
     quartiles = values.quantile([0, .25, .5, .75, 1]).tolist() if len(values) else [None] * 5
     steps = np.diff(times)
@@ -89,7 +106,8 @@ def device_row(request, frame, window_seconds):
             len(frame) / window_seconds if window_seconds else None,
             float(times[0]) if len(times) else None, float(times[-1]) if len(times) else None,
             *quartiles,
-            float(steps.mean()) if len(steps) else None, float(steps.var()) if len(steps) else None)
+            float(steps.mean()) if len(steps) else None, float(steps.var()) if len(steps) else None,
+            n_outside)
 
 
 def window_of(name):
@@ -109,8 +127,8 @@ def window_of(name):
 def index_file(db, path):
     stat = path.stat()
     window_start, window_end, version = window_of(path.name)
-    window_seconds = window_end - window_start if window_start is not None else None
-    rows = [device_row(request, frame, window_seconds) for request, frame in device_frames(path).items()]
+    window = (window_start, window_end) if window_start is not None else None
+    rows = [device_row(request, frame, window) for request, frame in device_frames(path).items()]
     firsts = [r[4] for r in rows if r[4] is not None]
     lasts = [r[5] for r in rows if r[5] is not None]
     now = datetime.now(timezone.utc).isoformat(timespec='seconds')
@@ -124,7 +142,7 @@ def index_file(db, path):
              window_start, window_end, min(firsts, default=None), max(lasts, default=None), version,
              len(rows), now)).lastrowid
         db.executemany(
-            'INSERT INTO device_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO device_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [(file_id, *row) for row in rows])
 
 
@@ -132,7 +150,13 @@ def open_db(db_path):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(db_path)
     db.execute('PRAGMA foreign_keys = ON')
+    version = db.execute('PRAGMA user_version').fetchone()[0]
+    has_tables = db.execute("SELECT count(*) FROM sqlite_master WHERE name = 'files'").fetchone()[0]
+    if has_tables and version < SCHEMA_VERSION:
+        print(f'catalog {db_path}: schema version {version} is older than {SCHEMA_VERSION}; rebuilding')
+        db.executescript('DROP TABLE IF EXISTS device_stats; DROP TABLE IF EXISTS files;')
     db.executescript(SCHEMA)
+    db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
     return db
 
 

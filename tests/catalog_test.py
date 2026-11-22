@@ -3,13 +3,16 @@
 
 import os
 import sqlite3
+from datetime import datetime
 
 import pandas as pd
 import pytest
 
 from datalogger_to_ml import catalog
 
-T0 = 1_763_000_000  # Unix seconds, November 2025; stamps must be real dates, or they read as milliseconds
+# Unix seconds at the start of the fixture's first window, 20261113T000000 in host local time, as file names are
+# read; stamps must lie in their file's window, or the catalog counts them outside it.
+T0 = int(datetime(2026, 11, 13).timestamp())
 
 
 def _parquet(path, start_us=T0 * 1_000_000):
@@ -28,7 +31,7 @@ def tree(tmp_path, monkeypatch):
     out = tmp_path / 'out'
     _parquet(out / '202611' / '13' / '20261113T000000PT1H-1_0_0.parquet')
     with pd.HDFStore(out / '20261113T010000PT1H-1_0_0.h5') as store:
-        stamps = [T0 * 1_000_000 + t for t in (0, 1_000_000, 3_000_000)]
+        stamps = [(T0 + 3600) * 1_000_000 + t for t in (0, 1_000_000, 3_000_000)]  # its window starts at 01:00
         store.append('A:ONE', pd.DataFrame({'Timestamps': stamps, 'Data': [1.0, 2.0, 3.0]}))
     return out
 
@@ -101,3 +104,47 @@ def test_millisecond_stamps_are_corrected(tmp_path, monkeypatch):
     st = db.execute("SELECT * FROM device_stats WHERE device = 'S:ST.STATUS.ON'").fetchone()
     assert (st['first_ts'], st['dt_mean']) == (start, 2.0)
     assert db.execute('SELECT data_start FROM files').fetchone()[0] == start
+
+
+def test_stamps_outside_the_window_are_counted_not_dropped(tmp_path, monkeypatch):
+    """Per device: strays are counted in n_outside_window and still enter the statistics; ms stamps count in."""
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / 'out' / '202611' / '13' / '20261113T000000PT1H-1_0_0.parquet'
+    path.parent.mkdir(parents=True)
+    us = T0 * 1_000_000
+    pd.DataFrame({
+        'device': ['A:ONE'] * 3 + ['S:ST.STATUS.ON'] * 2 + ['C:ODD'] * 3,
+        'Timestamps': [us, us + 1_000_000, us + 2_000_000,
+                       us // 1000, us // 1000 + 1000,                       # milliseconds, inside the window
+                       us, us - 86_400_000_000, us + 7_200_000_000],        # a day early and two hours late
+        'Data': [1.0, 2.0, 3.0, 0.0, 1.0, 5.0, 6.0, 7.0],
+    }).to_parquet(path, index=False)
+    catalog.build(catalog_path=tmp_path / 'out', db=tmp_path / 'cat.sqlite')
+    rows = {r['device']: r for r in _db(tmp_path).execute('SELECT * FROM device_stats')}
+    assert rows['A:ONE']['n_outside_window'] == 0
+    assert rows['S:ST.STATUS.ON']['n_outside_window'] == 0 and rows['S:ST.STATUS.ON']['first_ts'] == T0
+    assert rows['C:ODD']['n_outside_window'] == 2 and rows['C:ODD']['n_points'] == 3
+    assert rows['C:ODD']['first_ts'] == T0 - 86_400
+
+
+def test_no_window_leaves_the_count_null(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / 'out'
+    out.mkdir()
+    pd.DataFrame({'device': ['A:ONE'], 'Timestamps': [T0 * 1_000_000], 'Data': [1.0]}).to_parquet(out / 'w.parquet')
+    catalog.build(catalog_path=out, db=tmp_path / 'cat.sqlite')
+    assert _db(tmp_path).execute('SELECT n_outside_window FROM device_stats').fetchone()[0] is None
+
+
+def test_older_schema_is_rebuilt(tree, tmp_path, capsys):
+    """A catalog without user_version (1.6.x) is emptied and indexed again with the new columns."""
+    db_path = tmp_path / 'cat.sqlite'
+    old = sqlite3.connect(db_path)
+    old.executescript('CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT); INSERT INTO files VALUES (1, \'x\');')
+    old.close()
+    catalog.build(catalog_path=tree, db=db_path)
+    lines = capsys.readouterr().out.splitlines()
+    assert 'rebuilding' in lines[0] and '2 file(s) indexed, 0 removed, 2 in total' in lines[-1]
+    db = _db(tmp_path)
+    assert db.execute('PRAGMA user_version').fetchone()[0] == catalog.SCHEMA_VERSION
+    assert db.execute('SELECT count(*) FROM device_stats WHERE n_outside_window = 0').fetchone()[0] == 3
