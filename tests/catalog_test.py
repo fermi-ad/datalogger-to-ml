@@ -9,8 +9,10 @@ import pytest
 
 from datalogger_to_ml import catalog
 
+T0 = 1_763_000_000  # Unix seconds, November 2025; stamps must be real dates, or they read as milliseconds
 
-def _parquet(path, start_us=0):
+
+def _parquet(path, start_us=T0 * 1_000_000):
     """Two devices over one hour: A at 1 Hz (3600 points, values 0..3599), B at 0.5 Hz (1800 points)."""
     a = pd.DataFrame({'device': 'A:ONE@P,1000,true', 'Timestamps': start_us + pd.RangeIndex(3600) * 1_000_000,
                       'Data': pd.RangeIndex(3600).astype(float)})
@@ -26,7 +28,8 @@ def tree(tmp_path, monkeypatch):
     out = tmp_path / 'out'
     _parquet(out / '202611' / '13' / '20261113T000000PT1H-1_0_0.parquet')
     with pd.HDFStore(out / '20261113T010000PT1H-1_0_0.h5') as store:
-        store.append('A:ONE', pd.DataFrame({'Timestamps': [0, 1_000_000, 3_000_000], 'Data': [1.0, 2.0, 3.0]}))
+        stamps = [T0 * 1_000_000 + t for t in (0, 1_000_000, 3_000_000)]
+        store.append('A:ONE', pd.DataFrame({'Timestamps': stamps, 'Data': [1.0, 2.0, 3.0]}))
     return out
 
 
@@ -69,13 +72,13 @@ def test_reruns_skip_unchanged_reindex_changed_drop_deleted(tree, tmp_path, caps
     assert '0 file(s) indexed, 0 removed, 2 in total' in capsys.readouterr().out.splitlines()[-1]
 
     parquet = next(tree.rglob('*.parquet'))
-    _parquet(parquet, start_us=10_000_000)
+    _parquet(parquet, start_us=(T0 + 10) * 1_000_000)
     os.utime(parquet, (1e9, 1e9))  # a different modification time marks it changed
     (tree / '20261113T010000PT1H-1_0_0.h5').unlink()
     catalog.build(catalog_path=tree, db=db_path)
     assert '1 file(s) indexed, 1 removed, 1 in total' in capsys.readouterr().out.splitlines()[-1]
     db = _db(tmp_path)
-    assert db.execute('SELECT min(first_ts) FROM device_stats').fetchone()[0] == 10.0
+    assert db.execute('SELECT min(first_ts) FROM device_stats').fetchone()[0] == T0 + 10
     assert db.execute('SELECT count(*) FROM device_stats').fetchone()[0] == 2  # the deleted file's rows went with it
 
 
@@ -89,7 +92,7 @@ def test_millisecond_stamps_are_corrected(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     out = tmp_path / 'out'
     out.mkdir()
-    start = 1_763_000_000  # Unix seconds, November 2025
+    start = T0
     pd.DataFrame({'device': ['A:ONE', 'A:ONE', 'S:ST.STATUS.ON', 'S:ST.STATUS.ON'],
                   'Timestamps': [start * 1_000_000, (start + 1) * 1_000_000, start * 1000, (start + 2) * 1000],
                   'Data': [1.0, 2.0, 0.0, 1.0]}).to_parquet(out / 'w.parquet', index=False)
