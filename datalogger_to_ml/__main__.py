@@ -118,6 +118,24 @@ def main():
               'same output path (default: claims in config.yaml; none when unset).')
     )
     nanny_parser.add_argument(
+        '--end-time',
+        type=str,
+        help=('Pull only windows that end by this time, exclusive: ISO 8601, host local time unless it ends '
+              'in Z (UTC), e.g. 20261105T060000Z (default: end in config.yaml; none when unset).')
+    )
+    nanny_parser.add_argument(
+        '--split',
+        type=str,
+        help=('Deliver each window as files of this length, an ISO 8601 duration dividing the window '
+              '(e.g. T1H with duration 7D); Parquet only (default: split in config.yaml; none when unset).')
+    )
+    nanny_parser.add_argument(
+        '--pace',
+        type=float,
+        help=('Pause between windows, as a multiple of the last pull\'s run time: 4 rests 64 s after a '
+              '16 s pull (default: pace in config.yaml; no pause when unset).')
+    )
+    nanny_parser.add_argument(
         '--output-format',
         type=str,
         choices=list(IMPLEMENTED_OUTPUT_FORMATS.keys()),

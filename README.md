@@ -14,7 +14,9 @@ There are three sub-commands this CLI provides.
 
 ### Nanny
 
-The `nanny` sub-command generates data files, HDF5 or Parquet, from the AD data loggers, one file per time window, in a `YYYYMM/DD/` directory structure under the output path. The output path may be write-once storage such as pnfs, where a file cannot be edited in place, so each file is built and closed in a local workbench directory (`output.workbench` in the config, default `./workbench`) and only then delivered: copied in under a `.partial` name, written once front to back, and renamed. A crash never leaves a half-written file under a real name, and a stale `.partial` from an interrupted copy is removed before the next try. The generated data files are named using the [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) standard for timestamps with a period. The name of the file indicates the start time and duration. The name of the file also includes a version number at the end as a marker of requests list modification. e.g., `20200101T000000PT1H-1_0_0.h5`
+The `nanny` sub-command generates data files, HDF5 or Parquet, from the AD data loggers, one file per time window, in a `YYYYMM/DD/` directory structure under the output path. The output path may be write-once storage such as pnfs, where a file cannot be edited in place, so each file is built and closed in a local workbench directory (`output.workbench` in the config, default `./workbench`) and only then delivered: copied in under a `.partial` name, written once front to back, and renamed. A crash never leaves a half-written file under a real name, and a stale `.partial` from an interrupted copy is removed before the next try. The generated data files are named using the [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) standard for timestamps with a period. The name of the file indicates the start time and duration. The name of the file also includes a version number at the end as a marker of requests list modification. e.g., `20200101T060000ZPT1H-1_0_0.h5`
+
+Windows are in UTC (since 1.9.0), and file names mark it with `Z`; the `YYYYMM/DD/` folders are the UTC date of the window's start. In local time with no zone, as before, the hour repeated at the autumn time change got one name and one file holding both hours, and the hour skipped in spring had no meaning. Files named before 1.9.0 (`20200101T000000PT1H-1_0_0.h5`, host local time) still count as present, read in the host's zone (a repeated hour as its first occurrence), so an existing output path carries on without a gap or a second copy. A `start` or `end` without a zone is host local time; add `Z` for UTC (`20140106T000000Z`).
 
 Each run lists every whole window from the configured start to now and pulls each one that has no file yet, in any request-list version, newest first, so a skipped or failed window is retried on the next run and, during a long backfill, the latest windows land first. Run it from cron under `flock` and every gap fills itself. Without a configured start, `nanny` fills back to its earliest existing file, or pulls only the newest whole window.
 
@@ -57,7 +59,10 @@ Here's an example config file that uses a local requests list:
 
 ```
 
-When using the config file, a start datetime and duration can be specified. The default duration is one hour; without a start, see above.
+When using the config file, a start datetime and duration can be specified. The default duration is one hour; without a start, see above. Windows of any length work (e.g. `duration: 7D`); they are counted from the start, so a start at midnight UTC on a Monday gives weeks Monday to Monday.
+
+- `end` (or `--end-time`): pull only windows that end by this time (exclusive), e.g. a backfill that stops where a keep-up run starts.
+- `pace` (or `--pace`): after each window, rest this multiple of the pull's run time before the next request (e.g. `4`: a pull of 16 s, then 64 s of rest), to spread a long backfill's load on the loggers. No rest by default.
 
 The output format is `hdf5` (one table per request, keyed by the request) unless `output.format` in the config or `--output-format` says `parquet`: one long table per window with columns `device` (the request), `Timestamps` (microseconds, Unix epoch), and `Data`. Long rather than one column per device, because each device carries its own timestamps; an array device becomes one `device[i]` series per element.
 
@@ -85,10 +90,12 @@ writer; running `catalog` under one shared `flock` keeps it to one writer.
   local:
     file: requests.txt
     version: 2.0.0
-  start: 20140101T000000
+  start: 20140106T000000Z       # a Monday, UTC
+  end: 20261105T060000Z         # where the keep-up run starts
+  duration: 7D                  # week-long windows for slow history
+  pace: 4                       # rest 4x each pull's run time
   recency: P1D                  # backfill only: windows that ended at least a day ago
   claims: /var/tmp/nanny-claims # the same directory in both configs, on local disk
-  duration: T1H
   output:
     path: /data/nanny
 ```
@@ -109,7 +116,7 @@ The `-o` and `--output-path` flags allow users to set the location of the output
 
 ##### Recency and claims
 
-`--recency P1D` and `--claims DIR` override `recency` and `claims` in the config; see
+`--recency P1D`, `--claims DIR`, `--end-time 20261105T060000Z`, and `--pace 4` override `recency`, `claims`, `end`, and `pace` in the config; see
 [Backfill beside a keep-up run](#backfill-beside-a-keep-up-run).
 
 ##### Run once

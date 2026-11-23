@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 
 import fcntl
+import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -11,6 +12,11 @@ from datalogger_to_ml import nanny, h5_validator
 from datalogger_to_ml.dpm_data.dpm_data import _open_output
 
 HOUR = timedelta(hours=1)
+UTC = timezone.utc
+
+
+def utcnow():
+    return datetime.now(UTC)
 
 
 def test_missing_windows_newest_first_holes_included():
@@ -32,7 +38,7 @@ def test_existing_windows_any_version_never_partial(tmp_path):
     (day / '20261113T010000PT1H-0_1_0.parquet').touch()
     (day / '20261113T020000PT1H-1_0_0.parquet.partial').touch()
     (day / 'notes.parquet').touch()
-    start = datetime(2026, 11, 13)
+    start = nanny.to_utc(datetime(2026, 11, 13))  # names without a zone are host local time
     assert nanny.existing_windows(tmp_path, '.parquet') == {(start, HOUR), (start + HOUR, HOUR)}
 
 
@@ -54,7 +60,7 @@ def _run_nanny(tmp_path, monkeypatch, **extra):
 
 
 def test_nanny_fills_holes_newest_first(tmp_path, monkeypatch):
-    newest = nanny.last_whole_window(datetime.now(), HOUR)
+    newest = nanny.last_whole_window(utcnow(), HOUR)
     start = newest - 2 * HOUR
     middle = nanny.create_structured_path(tmp_path / 'out', start + HOUR)
     middle.mkdir(parents=True)
@@ -69,7 +75,7 @@ def test_nanny_fills_holes_newest_first(tmp_path, monkeypatch):
 
 
 def test_nanny_run_once_takes_only_the_newest(tmp_path, monkeypatch):
-    newest = nanny.last_whole_window(datetime.now(), HOUR)
+    newest = nanny.last_whole_window(utcnow(), HOUR)
     pulled = _run_nanny(tmp_path, monkeypatch, start_time=newest - 3 * HOUR, run_once=True)
     assert pulled == [newest]
 
@@ -147,16 +153,16 @@ def test_get_recency_from_cli_or_config():
 
 
 def test_backfill_leaves_the_recent_windows(tmp_path, monkeypatch):
-    newest = nanny.last_whole_window(datetime.now(), HOUR)
+    newest = nanny.last_whole_window(utcnow(), HOUR)
     pulled = _run_nanny(tmp_path, monkeypatch, start_time=newest - 5 * HOUR, recency='PT3H')
     # Windows ending within the last 3 h are the keep-up run's; the rest come newest first.
-    assert pulled and all(w + HOUR <= datetime.now() - 3 * HOUR for w in pulled)
+    assert pulled and all(w + HOUR <= utcnow() - 3 * HOUR for w in pulled)
     assert pulled == sorted(pulled, reverse=True) and pulled[-1] == newest - 5 * HOUR
     assert newest not in pulled and newest - HOUR not in pulled
 
 
 def test_a_claimed_window_is_skipped_and_claims_are_cleaned_up(tmp_path, monkeypatch):
-    newest = nanny.last_whole_window(datetime.now(), HOUR)
+    newest = nanny.last_whole_window(utcnow(), HOUR)
     claims = tmp_path / 'claims'
     claims.mkdir()
     held = claims / f'{nanny.name_output_file(newest, HOUR)}.lock'
@@ -171,7 +177,7 @@ def test_a_claimed_window_is_skipped_and_claims_are_cleaned_up(tmp_path, monkeyp
 
 
 def test_a_window_delivered_meanwhile_is_not_pulled_again(tmp_path, monkeypatch):
-    newest = nanny.last_whole_window(datetime.now(), HOUR)
+    newest = nanny.last_whole_window(utcnow(), HOUR)
     day = nanny.create_structured_path(tmp_path / 'out', newest)
     day.mkdir(parents=True)
     (day / f'{nanny.name_output_file(newest, HOUR)}-1_0_0.parquet').touch()
@@ -188,3 +194,103 @@ def test_claim_is_exclusive_and_removed_on_release(tmp_path):
     assert not (tmp_path / 'w.lock').exists()
     with nanny.claim(None, 'w') as anyone:
         assert anyone
+
+
+def test_names_carry_utc_and_old_local_names_still_count(tmp_path, monkeypatch):
+    monkeypatch.setenv('TZ', 'America/Chicago')
+    __import__('time').tzset()
+    try:
+        start = datetime(2026, 11, 1, 6, tzinfo=UTC)
+        assert nanny.name_output_file(start, HOUR) == '20261101T060000ZPT1H'
+        assert nanny.name_output_file(start, timedelta(days=7)) == '20261101T060000ZP7D'
+        assert nanny.parse_iso('20261101T060000ZP7D') == (start, timedelta(days=7))
+        day = tmp_path / '202611' / '01'
+        day.mkdir(parents=True)
+        # Before 1.9.0 the autumn time change's two 01:00 hours had one local name: it stands for the first.
+        (day / '20261101T010000PT1H-2_0_0.parquet').touch()
+        (day / '20261101T080000ZPT1H-1_0_0.parquet').touch()
+        have = nanny.existing_windows(tmp_path, '.parquet')
+        assert have == {(start, HOUR), (start + 2 * HOUR, HOUR)}
+        # The second 01:00 (CST, 07:00 UTC) is an hour of its own, missing until pulled.
+        assert nanny.missing_windows(start, HOUR, start + 3 * HOUR, have) == [start + HOUR]
+        assert nanny.get_configured_start({}, {'start': '20261105T000000'})[0] == datetime(2026, 11, 5, 6, tzinfo=UTC)
+        assert nanny.get_configured_start({}, {'start': '20261105T000000Z'})[0] == datetime(2026, 11, 5, tzinfo=UTC)
+    finally:
+        monkeypatch.undo()
+        __import__('time').tzset()
+
+
+def test_utc_windows_cross_the_time_changes_without_doubles_or_gaps():
+    # Chicago's 2026-11-01 has 25 hours and 2026-03-08 has 23; in UTC every hour is one window.
+    for day, hours in (('2026-11-01', 25), ('2026-03-08', 23)):
+        local = datetime.fromisoformat(day).replace(tzinfo=__import__('zoneinfo').ZoneInfo('America/Chicago'))
+        first, last = local.astimezone(UTC), (local + timedelta(days=1)).astimezone(UTC)
+        windows = nanny.missing_windows(first, HOUR, last, set())
+        assert len(windows) == hours and len(set(windows)) == hours
+
+
+def test_end_stops_the_windows():
+    start = datetime(2026, 11, 13, tzinfo=UTC)
+    now = start + 10 * HOUR
+    end = nanny.get_configured_end({}, {'end': '20261113T040000Z'})
+    assert end == start + 4 * HOUR
+    assert nanny.missing_windows(start, HOUR, now, set(), (None, end)) == [start + 3 * HOUR, start + 2 * HOUR,
+                                                                           start + HOUR, start]
+    assert nanny.get_configured_end({'end_time': '20261113T020000Z'}, {'end': '20261113T040000Z'}) == start + 2 * HOUR
+    assert nanny.get_configured_end({}, {}) is None
+
+
+def test_pace_rests_a_multiple_of_each_pull(tmp_path, monkeypatch):
+    clock = [0.0]
+    rests = []
+    monkeypatch.setattr(nanny.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(nanny.time, 'sleep', rests.append)
+    real_pull = nanny.pull_window
+
+    def slow_pull(*args):
+        clock[0] += 16.0
+        real_pull(*args)
+
+    monkeypatch.setattr(nanny, 'pull_window', slow_pull)
+    newest = nanny.last_whole_window(utcnow(), HOUR)
+    pulled = _run_nanny(tmp_path, monkeypatch, start_time=newest - 2 * HOUR, pace=4)
+    assert len(pulled) == 3 and rests == [64.0, 64.0]  # no rest before the first window or after the last
+    assert nanny.get_pace({}, {}) == 0 and nanny.get_pace({}, {'pace': 4}) == 4.0
+
+
+def test_log_level_from_cli_else_config():
+    assert nanny.get_log_level({}, {'logging': {'level': 'INFO'}}) == 'INFO'
+    assert nanny.get_log_level({'verbose': 2}, {'logging': {'level': 'INFO'}}) == logging.DEBUG
+    assert nanny.get_log_level({'verbose': 0}, {}) == logging.WARNING
+
+
+def test_split_delivers_parts_named_as_hours_and_keeps_strays(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'requests.txt').write_text('M:OUTTMP\n')
+    start = datetime(2025, 3, 3, tzinfo=UTC)
+    t0 = round(start.timestamp() * 1e6)
+    us_h = 3600 * 10**6
+    rows = [('A', t0 - 10**6, 0.0), ('A', t0, 1.0), ('B', t0 + us_h - 1, 2.0), ('A', t0 + us_h, 3.0),
+            ('A', t0 + 3 * us_h + 10**6, 4.0)]  # one stray before the window and one after it
+
+    def fake_get_data(**kwargs):
+        pd.DataFrame(rows, columns=['device', 'Timestamps', 'Data']).to_parquet(kwargs['output_file'], index=False)
+
+    monkeypatch.setattr(nanny.dpm_data, 'get_data', fake_get_data)
+    out = tmp_path / 'out'
+    third = nanny.create_structured_path(out, start + 2 * HOUR)
+    third.mkdir(parents=True)
+    (third / f'{nanny.name_output_file(start + 2 * HOUR, HOUR)}-1_0_0.parquet').touch()  # the keep-up's
+    nanny.get_data(output_path=out, requests_list='requests.txt', output_format='parquet',
+                   start_time=start, end_time='20250303T030000Z', duration='T3H', split='T1H')
+    files = sorted(p.name for p in out.rglob('*.parquet'))
+    assert files == ['20250303T000000ZPT1H-v0_1_0.parquet', '20250303T010000ZPT1H-v0_1_0.parquet',
+                     '20250303T020000ZPT1H-1_0_0.parquet']
+    first = pd.read_parquet(next(out.rglob('20250303T000000ZPT1H-v0_1_0.parquet')))
+    assert first['Data'].tolist() == [0.0, 1.0, 2.0]
+    assert pd.read_parquet(next(out.rglob('20250303T010000ZPT1H-v0_1_0.parquet')))['Data'].tolist() == [3.0]
+    assert list((tmp_path / 'workbench').iterdir()) == []
+    # All three parts present now: the window counts as present and is not pulled again.
+    have = nanny.existing_windows(out, '.parquet')
+    assert nanny.missing_windows(start, 3 * HOUR, start + 10 * HOUR, have, start + 3 * HOUR, split=HOUR) == []
+    assert nanny.missing_windows(start, 3 * HOUR, start + 10 * HOUR, have, start + 3 * HOUR) == [start]

@@ -119,7 +119,7 @@ def window_of(name):
         start, duration = parse_iso(stem)
     except ValueError:
         return None, None, None
-    # Names are in host local time, as the nanny writes them.
+    # A name ending in Z is UTC (1.9.0 on); one without a zone is host local time, as the nanny wrote before.
     start_s = start.astimezone().timestamp()
     return start_s, start_s + duration.total_seconds(), rest.split('.')[0].replace('_', '.')
 
