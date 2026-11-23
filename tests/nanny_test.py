@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import fcntl
+import os
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -129,3 +131,60 @@ def test_deliver_across_filesystems_replaces_a_stale_partial(tmp_path, monkeypat
     nanny.deliver(work, dest)
     assert dest.read_bytes() == b'complete'
     assert not work.exists() and not (dest.parent / 'w.parquet.partial').exists()
+
+
+def test_missing_windows_stops_at_the_cutoff():
+    start = datetime(2026, 11, 13, 0, 0)
+    now = datetime(2026, 11, 13, 5, 30)
+    assert nanny.missing_windows(start, HOUR, now, set(), cutoff=now - 3 * HOUR) == [start + HOUR, start]
+
+
+def test_get_recency_from_cli_or_config():
+    assert nanny.get_recency({}, {}) is None
+    assert nanny.get_recency({}, {'recency': 'P2D'}) == timedelta(days=2)
+    assert nanny.get_recency({'recency': 'PT36H'}, {'recency': 'P2D'}) == timedelta(hours=36)
+    assert nanny.get_recency({}, {'recency': 'T6H'}) == timedelta(hours=6)
+
+
+def test_backfill_leaves_the_recent_windows(tmp_path, monkeypatch):
+    newest = nanny.last_whole_window(datetime.now(), HOUR)
+    pulled = _run_nanny(tmp_path, monkeypatch, start_time=newest - 5 * HOUR, recency='PT3H')
+    # Windows ending within the last 3 h are the keep-up run's; the rest come newest first.
+    assert pulled and all(w + HOUR <= datetime.now() - 3 * HOUR for w in pulled)
+    assert pulled == sorted(pulled, reverse=True) and pulled[-1] == newest - 5 * HOUR
+    assert newest not in pulled and newest - HOUR not in pulled
+
+
+def test_a_claimed_window_is_skipped_and_claims_are_cleaned_up(tmp_path, monkeypatch):
+    newest = nanny.last_whole_window(datetime.now(), HOUR)
+    claims = tmp_path / 'claims'
+    claims.mkdir()
+    held = claims / f'{nanny.name_output_file(newest, HOUR)}.lock'
+    fd = os.open(held, os.O_CREAT | os.O_RDWR)
+    fcntl.flock(fd, fcntl.LOCK_EX)  # another nanny is pulling the newest window
+    try:
+        pulled = _run_nanny(tmp_path, monkeypatch, start_time=newest - HOUR, claims=claims)
+    finally:
+        os.close(fd)
+    assert pulled == [newest - HOUR]
+    assert [p.name for p in claims.iterdir()] == [held.name]  # only the other's claim remains
+
+
+def test_a_window_delivered_meanwhile_is_not_pulled_again(tmp_path, monkeypatch):
+    newest = nanny.last_whole_window(datetime.now(), HOUR)
+    day = nanny.create_structured_path(tmp_path / 'out', newest)
+    day.mkdir(parents=True)
+    (day / f'{nanny.name_output_file(newest, HOUR)}-1_0_0.parquet').touch()
+    monkeypatch.setattr(nanny, 'existing_windows', lambda *a: set())  # the list predates that delivery
+    pulled = _run_nanny(tmp_path, monkeypatch, start_time=newest - HOUR)
+    assert pulled == [newest - HOUR]
+
+
+def test_claim_is_exclusive_and_removed_on_release(tmp_path):
+    with nanny.claim(tmp_path, 'w') as first:
+        assert first
+        with nanny.claim(tmp_path, 'w') as second:
+            assert not second  # held by the first
+    assert not (tmp_path / 'w.lock').exists()
+    with nanny.claim(None, 'w') as anyone:
+        assert anyone

@@ -148,7 +148,7 @@ def index_file(db, path):
 
 def open_db(db_path):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(db_path)
+    db = sqlite3.connect(db_path, timeout=600)  # a second writer (a backfill's catalog run) waits its turn
     db.execute('PRAGMA foreign_keys = ON')
     version = db.execute('PRAGMA user_version').fetchone()[0]
     has_tables = db.execute("SELECT count(*) FROM sqlite_master WHERE name = 'files'").fetchone()[0]

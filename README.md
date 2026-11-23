@@ -61,6 +61,38 @@ When using the config file, a start datetime and duration can be specified. The 
 
 The output format is `hdf5` (one table per request, keyed by the request) unless `output.format` in the config or `--output-format` says `parquet`: one long table per window with columns `device` (the request), `Timestamps` (microseconds, Unix epoch), and `Data`. Long rather than one column per device, because each device carries its own timestamps; an array device becomes one `device[i]` series per element.
 
+#### Backfill beside a keep-up run
+
+Two nannies can share one output path: a keep-up run from cron that pulls the newest windows each hour, and a
+backfill run that pulls years of history, for hours or days. Each has its own directory, so its own
+`config.yaml`, `nanny.log`, and workbench, and both set the same `claims` directory. They cooperate in three ways:
+
+- **Recency cutoff.** The backfill's config sets `recency` (or `--recency`), an ISO 8601 duration such as `P1D`:
+  it then pulls only windows that ended at least that long ago, and never competes for the newest ones.
+- **Claims.** Before pulling a window, each nanny takes an exclusive lock on `<claims>/<window>.lock` (local
+  disk, shared by both), and skips any window the other holds; a claim lapses when its holder exits, even by a
+  crash. So an old hole in the keep-up run's range is never pulled twice at once.
+- **A fresh look before each pull.** The list of missing windows is made when a run starts; just before
+  pulling, each nanny checks again whether the window has a file (any request-list version), so a window the
+  other delivered meanwhile is skipped.
+
+Every window still lands under one name per window, and both runs see each other's files as present. Give them
+different request-list versions to tell their files apart. The catalog waits up to 10 minutes for the other
+writer; running `catalog` under one shared `flock` keeps it to one writer.
+
+```yaml
+---
+  local:
+    file: requests.txt
+    version: 2.0.0
+  start: 20140101T000000
+  recency: P1D                  # backfill only: windows that ended at least a day ago
+  claims: /var/tmp/nanny-claims # the same directory in both configs, on local disk
+  duration: T1H
+  output:
+    path: /data/nanny
+```
+
 #### CLI arguments
 
 ##### Requests list
@@ -74,6 +106,11 @@ The `-l` and `--list-version` flags allow users to set the version number. The d
 ##### Output path
 
 The `-o` and `--output-path` flags allow users to set the location of the output directories [described above](#nanny). The default is the current directory, `.`.
+
+##### Recency and claims
+
+`--recency P1D` and `--claims DIR` override `recency` and `claims` in the config; see
+[Backfill beside a keep-up run](#backfill-beside-a-keep-up-run).
 
 ##### Run once
 

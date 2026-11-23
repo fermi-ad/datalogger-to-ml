@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from contextlib import contextmanager
 from glob import glob
 from pathlib import Path
 from pathlib import PurePath
 import errno
+import fcntl
+import os
 from os import makedirs, replace
 import shutil
 from datetime import datetime, timedelta
@@ -155,16 +158,79 @@ def last_whole_window(now, duration):
     return midnight + ((now - midnight) // duration - 1) * duration
 
 
-def missing_windows(start_time, duration, now, have):
+def missing_windows(start_time, duration, now, have, cutoff=None):
     """Every whole window from start_time to now without a file, newest first: during a long
-    backfill the latest hours land first, so the archive stays current while older holes fill."""
+    backfill the latest hours land first, so the archive stays current while older holes fill.
+    With a cutoff, only windows that end by the cutoff (see get_recency)."""
+    limit = now if cutoff is None else min(now, cutoff)
     windows = []
     window = start_time
-    while window + duration <= now:
+    while window + duration <= limit:
         if (window, duration) not in have:
             windows.append(window)
         window += duration
     return windows[::-1]
+
+
+def get_recency(args, config):
+    """Recency cutoff for a backfill: an ISO 8601 duration (e.g. P2D or PT36H) from --recency or
+    `recency` in the config, or None. A run with one pulls only windows that ended at least that long
+    ago, leaving the newest to the keep-up run (README, "Backfill beside a keep-up run")."""
+    recency = args.get('recency', config.get('recency'))
+    if recency is None or isinstance(recency, timedelta):
+        return recency
+    text = str(recency)
+    return isodate.parse_duration(text if text.startswith('P') else f'P{text}')
+
+
+def get_claims(args, config):
+    """Directory of per-window claim locks shared by every nanny writing to one output path, or None."""
+    claims = args.get('claims', config.get('claims'))
+    return None if claims is None else Path(claims)
+
+
+@contextmanager
+def claim(claims_dir, name):
+    """Claim one window for this process; yields True when claimed, False when another holds it.
+
+    The claim is an exclusive flock on <claims_dir>/<name>.lock, so it lapses by itself when its holder
+    exits, even by a crash: no stale claims. The file is removed on release; a process that locked a
+    file just removed finds its inode no longer at the path and gives the window up. claims_dir must be
+    on a filesystem with working locks (local disk) and shared by all the nannies of one output path.
+    Without claims_dir every window counts as claimed (a single nanny needs none).
+    """
+    if claims_dir is None:
+        yield True
+        return
+    makedirs(claims_dir, exist_ok=True)
+    path = Path(claims_dir).joinpath(f'{name}.lock')
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            held = os.stat(path).st_ino == os.fstat(fd).st_ino
+        except FileNotFoundError:
+            held = False
+        if not held:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            path.unlink(missing_ok=True)
+    finally:
+        os.close(fd)
+
+
+def window_present(outputs_directory, start_time, duration, file_extension):
+    """True when the window has a delivered file, in any request-list version (as existing_windows)."""
+    pattern = create_structured_path(outputs_directory, start_time).joinpath(
+        f'{name_output_file(start_time, duration)}-*{file_extension}')
+    return bool(glob(str(pattern)))
 
 
 def name_output_file(start_time, duration=None):
@@ -376,8 +442,12 @@ def get_data(**kwargs):
         (start for start, length in have if length == duration),
         default=last_whole_window(now, duration)
     )
-    windows = missing_windows(start_time, duration, now, have)
-    logger.info('%s window(s) to pull since %s', len(windows), start_time)
+    recency = get_recency(kwargs, config)
+    cutoff = None if recency is None else now - recency
+    windows = missing_windows(start_time, duration, now, have, cutoff)
+    logger.info('%s window(s) to pull since %s%s', len(windows), start_time,
+                '' if cutoff is None else f', ending by {cutoff} (recency {recency})')
+    claims_dir = get_claims(kwargs, config)
     if kwargs.get('run-once', kwargs.get('run_once')):
         windows = windows[:1]
 
@@ -385,35 +455,50 @@ def get_data(**kwargs):
     makedirs(workbench, exist_ok=True)
     request_list_version = device_list_version.replace('.', '_')
     for start_time in windows:
-        end_time = start_time + duration
-        structured_outputs_directory = create_structured_path(
-            outputs_directory,
-            start_time
-        )
-        makedirs(structured_outputs_directory, exist_ok=True)
+        with claim(claims_dir, name_output_file(start_time, duration)) as claimed:
+            if not claimed:
+                logger.info('Skipping %s: another nanny holds its claim.', start_time)
+                continue
+            # The list above is from the start of the run; another nanny may have filled it since.
+            if window_present(outputs_directory, start_time, duration, file_extension):
+                logger.info('Skipping %s: delivered meanwhile.', start_time)
+                continue
+            pull_window(start_time, duration, outputs_directory, request_list_version, file_extension,
+                        workbench, requests_list, output_format)
 
-        iso_datetime_duration = name_output_file(start_time, duration)
-        output_filename = f'{iso_datetime_duration}-{request_list_version}{file_extension}'
-        output_path_and_filename = Path(structured_outputs_directory).joinpath(output_filename)
-        # Built and closed in the local workbench, then delivered (see deliver()).
-        work_file = workbench.joinpath(output_filename)
-        logger.debug('Output path and filename is: %s', output_path_and_filename)
 
-        logger.info('Calling dpm_data.main...')
-        logger.debug(
-            ('start_date=%s, end_date=%s, device_file=%s, '
-             'output_file=%s, debug=True'),
-            start_time,
-            end_time,
-            requests_list,
-            work_file
-        )
-        dpm_data.get_data(
-            start_date=start_time,
-            end_date=end_time,
-            device_file=requests_list,
-            output_file=work_file,
-            output_format=output_format,
-            debug=True
-        )
-        deliver(work_file, output_path_and_filename)
+def pull_window(start_time, duration, outputs_directory, request_list_version, file_extension,
+                workbench, requests_list, output_format):
+    """Pull one window into the workbench and deliver it to the output path."""
+    end_time = start_time + duration
+    structured_outputs_directory = create_structured_path(
+        outputs_directory,
+        start_time
+    )
+    makedirs(structured_outputs_directory, exist_ok=True)
+
+    iso_datetime_duration = name_output_file(start_time, duration)
+    output_filename = f'{iso_datetime_duration}-{request_list_version}{file_extension}'
+    output_path_and_filename = Path(structured_outputs_directory).joinpath(output_filename)
+    # Built and closed in the local workbench, then delivered (see deliver()).
+    work_file = workbench.joinpath(output_filename)
+    logger.debug('Output path and filename is: %s', output_path_and_filename)
+
+    logger.info('Calling dpm_data.main...')
+    logger.debug(
+        ('start_date=%s, end_date=%s, device_file=%s, '
+         'output_file=%s, debug=True'),
+        start_time,
+        end_time,
+        requests_list,
+        work_file
+    )
+    dpm_data.get_data(
+        start_date=start_time,
+        end_date=end_time,
+        device_file=requests_list,
+        output_file=work_file,
+        output_format=output_format,
+        debug=True
+    )
+    deliver(work_file, output_path_and_filename)

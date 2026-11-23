@@ -106,6 +106,18 @@ def main():
         help='Date and time to start data acquisition.'
     )
     nanny_parser.add_argument(
+        '--recency',
+        type=str,
+        help=('Backfill: pull only windows that ended at least this long ago, an ISO 8601 duration '
+              '(e.g. P2D), leaving the newer ones to the keep-up run (default: recency in config.yaml).')
+    )
+    nanny_parser.add_argument(
+        '--claims',
+        type=Path,
+        help=('Directory of per-window claim locks, on local disk, shared by every nanny writing to the '
+              'same output path (default: claims in config.yaml; none when unset).')
+    )
+    nanny_parser.add_argument(
         '--output-format',
         type=str,
         choices=list(IMPLEMENTED_OUTPUT_FORMATS.keys()),
