@@ -130,6 +130,24 @@ def main():
               '(e.g. T1H with duration 7D); Parquet only (default: split in config.yaml; none when unset).')
     )
     nanny_parser.add_argument(
+        '--retry-empty',
+        type=int,
+        help=('Ask again this many times for a window whose reply has no rows, Parquet only (default: '
+              'retry-empty in config.yaml; 2 when unset).')
+    )
+    nanny_parser.add_argument(
+        '--retry-pause',
+        type=float,
+        help='Seconds before each of those tries (default: retry-pause in config.yaml; 60 when unset).'
+    )
+    nanny_parser.add_argument(
+        '--refill-empty',
+        action='store_true',
+        default=None,
+        help=('Treat windows whose files hold no rows as missing: pull them again and replace the empty '
+              'files when the reply has data (Parquet only; default: refill-empty in config.yaml).')
+    )
+    nanny_parser.add_argument(
         '--pace',
         type=float,
         help=('Pause between windows, as a multiple of the last pull\'s run time: 4 rests 64 s after a '

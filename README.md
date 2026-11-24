@@ -63,6 +63,8 @@ When using the config file, a start datetime and duration can be specified. The 
 
 - `end` (or `--end-time`): pull only windows that end by this time (exclusive), e.g. a backfill that stops where a keep-up run starts.
 - `pace` (or `--pace`): after each window, rest this multiple of the pull's run time before the next request (e.g. `4`: a pull of 16 s, then 64 s of rest), to spread a long backfill's load on the loggers. No rest by default.
+- `retry-empty` and `retry-pause` (or `--retry-empty`, `--retry-pause`): a Parquet reply with no rows is requested again this many times (default 2), this many seconds apart (default 60), before it is delivered as is. The loggers have answered a whole hour with nothing once, and with data when asked again; a reply still empty after the tries is taken for an outage and delivered, so the window counts as pulled. Both defaults are untested; `retry-empty: 0` turns the tries off.
+- `refill-empty` (or `--refill-empty`), for one run by hand: windows whose files all hold no rows count as missing; each is pulled again, and a reply with data replaces the empty files (an empty reply leaves them). Parquet only, and the output must allow replacing files. Reading every file's footer to find the empty ones takes a while on a large tree.
 
 The output format is `hdf5` (one table per request, keyed by the request) unless `output.format` in the config or `--output-format` says `parquet`: one long table per window with columns `device` (the request), `Timestamps` (microseconds, Unix epoch), and `Data`. Long rather than one column per device, because each device carries its own timestamps; an array device becomes one `device[i]` series per element.
 

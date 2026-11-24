@@ -20,6 +20,7 @@ from typing import Any
 import isodate
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import requests
 import yaml
 from . import dpm_data
@@ -291,6 +292,60 @@ def window_present(outputs_directory, start_time, duration, file_extension):
     return bool(glob(str(pattern)))
 
 
+def parquet_rows(path):
+    """Rows in a Parquet file from its footer, or None when it cannot be read as Parquet."""
+    try:
+        return pq.read_metadata(path).num_rows
+    except Exception:  # not Parquet, or cut short: never taken for empty
+        return None
+
+
+def window_files(outputs_directory, start_time, duration, file_extension):
+    pattern = create_structured_path(outputs_directory, start_time).joinpath(
+        f'{name_output_file(start_time, duration)}-*{file_extension}')
+    return sorted(glob(str(pattern)))
+
+
+def window_filled(outputs_directory, start_time, duration, file_extension, refill_empty=False):
+    """As window_present; with refill_empty, a window whose files all hold no rows counts as missing."""
+    files = window_files(outputs_directory, start_time, duration, file_extension)
+    if not refill_empty:
+        return bool(files)
+    return any(parquet_rows(f) != 0 for f in files)
+
+
+def empty_windows(output_path, file_extension):
+    """(start, duration) of every window whose files all hold no rows (Parquet only), for refill_empty."""
+    found = {}
+    for path in glob(str(Path(output_path).joinpath('**', f'*{file_extension}')), recursive=True):
+        name = PurePath(path).name.split('-')[0]
+        try:
+            start, duration = parse_iso(name)
+        except ValueError:
+            continue
+        key = (to_utc(start), duration)
+        found[key] = found.get(key, True) and parquet_rows(path) == 0
+    return {key for key, empty in found.items() if empty}
+
+
+def drop_empty_files(outputs_directory, start_time, duration, file_extension, keep):
+    """After a refill delivered data, remove the window's older files that hold no rows."""
+    for f in window_files(outputs_directory, start_time, duration, file_extension):
+        if Path(f) != Path(keep) and parquet_rows(f) == 0:
+            Path(f).unlink()
+            logger.info('Replaced empty file %s.', f)
+
+
+def get_retry_empty(args, config):
+    """Tries again for a reply with no rows (Parquet only), from --retry-empty or `retry-empty` in the
+    config, default 2; and the pause before each, in seconds, from --retry-pause or `retry-pause`, default
+    60. A reply still empty after them is delivered, so a real logger outage counts as pulled. Both defaults
+    are untested guesses: the one empty reply seen (2026-11-24) read full 25 minutes later."""
+    tries = args.get('retry-empty', args.get('retry_empty', config.get('retry-empty', 2)))
+    pause = args.get('retry-pause', args.get('retry_pause', config.get('retry-pause', 60)))
+    return int(tries), float(pause)
+
+
 def name_output_file(start_time, duration=None):
     """START[DURATION] of a file name: 20261123T200000ZPT1H for an aware start (in UTC, marked Z), or
     20261123T140000PT1H for a naive one (host local time, the form before 1.9.0)."""
@@ -502,6 +557,12 @@ def get_data(**kwargs):
     split = get_split(kwargs, config)
     if split is not None and (duration % split or output_format != 'parquet'):
         sys.exit(f'split {split} must divide duration {duration} evenly, with output format parquet.')
+    refill = bool(kwargs.get('refill-empty', kwargs.get('refill_empty', config.get('refill-empty', False))))
+    if refill:
+        if output_format != 'parquet':
+            sys.exit('refill-empty needs output format parquet.')
+        have -= empty_windows(outputs_directory, file_extension)
+    retries = get_retry_empty(kwargs, config) if output_format == 'parquet' else (0, 0.0)
     windows = missing_windows(start_time, duration, now, have, (cutoff, end), split)
     logger.info('%s window(s) to pull since %s%s%s', len(windows), start_time,
                 '' if cutoff is None else f', ending by {cutoff} (recency {recency})',
@@ -525,20 +586,25 @@ def get_data(**kwargs):
                 logger.info('Skipping %s: another nanny holds its claim.', start_time)
                 continue
             # The list above is from the start of the run; another nanny may have filled it since.
-            if all(window_present(outputs_directory, s, split or duration, file_extension)
+            if all(window_filled(outputs_directory, s, split or duration, file_extension, refill)
                    for s in sub_windows(start_time, duration, split)):
                 logger.info('Skipping %s: delivered meanwhile.', start_time)
                 continue
             began = time.monotonic()
             pull_window(start_time, duration, outputs_directory, request_list_version, file_extension,
-                        workbench, requests_list, output_format, split, claims_dir)
+                        workbench, requests_list, output_format, split, claims_dir, retries, refill)
             pulled = time.monotonic() - began
             logger.info('Pulled %s in %.1f s.', name_output_file(start_time, duration), pulled)
 
 
 def pull_window(start_time, duration, outputs_directory, request_list_version, file_extension,
-                workbench, requests_list, output_format, split=None, claims_dir=None):
-    """Pull one window into the workbench and deliver it to the output path (in parts, with a split)."""
+                workbench, requests_list, output_format, split=None, claims_dir=None, retries=(0, 0.0),
+                refill=False):
+    """Pull one window into the workbench and deliver it to the output path (in parts, with a split).
+
+    A reply with no rows is requested again up to retries[0] times, retries[1] seconds apart (dx-32 in
+    cmtf-twin: the loggers once answered a whole hour with nothing, and full when asked again). With
+    refill, an empty reply never replaces a file, and a reply with data replaces the window's empty files."""
     end_time = start_time + duration
     structured_outputs_directory = create_structured_path(
         outputs_directory,
@@ -562,30 +628,49 @@ def pull_window(start_time, duration, outputs_directory, request_list_version, f
         requests_list,
         work_file
     )
-    dpm_data.get_data(
-        start_date=start_time,
-        end_date=end_time,
-        device_file=requests_list,
-        output_file=work_file,
-        output_format=output_format,
-        debug=True
-    )
+    tries, pause = retries
+    for attempt in range(tries + 1):
+        if attempt:
+            logger.warning('Empty reply for %s; asking again in %.0f s (%s of %s).',
+                           iso_datetime_duration, pause, attempt, tries)
+            time.sleep(pause)
+        dpm_data.get_data(
+            start_date=start_time,
+            end_date=end_time,
+            device_file=requests_list,
+            output_file=work_file,
+            output_format=output_format,
+            debug=True
+        )
+        if output_format != 'parquet' or parquet_rows(work_file) != 0:
+            break
+    else:
+        if tries:
+            logger.warning('Empty reply for %s after %s tries: delivered as is (a logger outage, or not).',
+                           iso_datetime_duration, tries + 1)
+    if refill and parquet_rows(work_file) == 0:
+        logger.info('Refill of %s still empty: kept the existing file.', iso_datetime_duration)
+        Path(work_file).unlink()
+        return
     if split is None:
         deliver(work_file, output_path_and_filename)
+        if refill:
+            drop_empty_files(outputs_directory, start_time, duration, file_extension, output_path_and_filename)
     else:
         deliver_split(work_file, start_time, duration, split, outputs_directory, request_list_version,
-                      file_extension, workbench, claims_dir)
+                      file_extension, workbench, claims_dir, refill)
 
 
 def deliver_split(work_file, start_time, duration, split, outputs_directory, request_list_version,
-                  file_extension, workbench, claims_dir):
+                  file_extension, workbench, claims_dir, refill=False):
     """Cut one pulled Parquet window into files of length split, and deliver each part that has no file yet.
 
     Each part is named and placed as if pulled on its own (20250303T010000ZPT1H-2_0_0.parquet), so readers
     of hour files need no change. Points stamped before the window go to the first part and points at or
     after its end to the last, so none is dropped; the catalog still counts them as outside their file's
     window. Each part is claimed and checked again just before delivery, so a part another nanny holds or
-    has delivered is left to it.
+    has delivered is left to it. With refill, a part with no rows is left as it is, and a part with rows
+    replaces its window's empty files.
     """
     table = pd.read_parquet(work_file)
     starts = sub_windows(start_time, duration, split)
@@ -595,14 +680,18 @@ def deliver_split(work_file, start_time, duration, split, outputs_directory, req
     for k, start in enumerate(starts):
         name = name_output_file(start, split)
         with claim(claims_dir, name) as claimed:
-            if not claimed or window_present(outputs_directory, start, split, file_extension):
+            if not claimed or window_filled(outputs_directory, start, split, file_extension, refill):
                 logger.info('Leaving part %s: another nanny holds or delivered it.', name)
+                continue
+            if refill and not (part == k).any():
                 continue
             piece = Path(workbench).joinpath(f'{name}-{request_list_version}{file_extension}')
             table[part == k].to_parquet(piece, index=False)
             directory = create_structured_path(outputs_directory, start)
             makedirs(directory, exist_ok=True)
             deliver(piece, directory.joinpath(piece.name))
+            if refill:
+                drop_empty_files(outputs_directory, start, split, file_extension, directory.joinpath(piece.name))
             delivered += 1
     Path(work_file).unlink()
     logger.info('Delivered %s of %s parts of %s.', delivered, len(starts), name_output_file(start_time, duration))

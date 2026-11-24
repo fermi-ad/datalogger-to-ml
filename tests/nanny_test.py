@@ -294,3 +294,109 @@ def test_split_delivers_parts_named_as_hours_and_keeps_strays(tmp_path, monkeypa
     have = nanny.existing_windows(out, '.parquet')
     assert nanny.missing_windows(start, 3 * HOUR, start + 10 * HOUR, have, start + 3 * HOUR, split=HOUR) == []
     assert nanny.missing_windows(start, 3 * HOUR, start + 10 * HOUR, have, start + 3 * HOUR) == [start]
+
+
+def _replies(monkeypatch, replies):
+    """Replace the logger read with one that writes the given row lists in turn, the last one repeating."""
+    calls = []
+
+    def fake_get_data(**kwargs):
+        rows = replies[min(len(calls), len(replies) - 1)]
+        calls.append(kwargs['start_date'])
+        pd.DataFrame(rows, columns=['device', 'Timestamps', 'Data']).astype(
+            {'device': str, 'Timestamps': 'int64', 'Data': float}).to_parquet(kwargs['output_file'], index=False)
+
+    monkeypatch.setattr(nanny.dpm_data, 'get_data', fake_get_data)
+    return calls
+
+
+def test_an_empty_reply_is_asked_again_and_a_full_one_delivered(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'requests.txt').write_text('M:OUTTMP\n')
+    start = datetime(2026, 4, 14, 3, tzinfo=UTC)
+    t0 = round(start.timestamp() * 1e6)
+    calls = _replies(monkeypatch, [[], [('L:CPSI', t0, 1.0)]])
+    rests = []
+    monkeypatch.setattr(nanny.time, 'sleep', rests.append)
+    out = tmp_path / 'out'
+    nanny.get_data(output_path=out, requests_list='requests.txt', output_format='parquet',
+                   start_time=start, end_time='20260414T040000Z', retry_pause=30)
+    assert len(calls) == 2 and rests == [30.0]
+    (f,) = out.rglob('*.parquet')
+    assert len(pd.read_parquet(f)) == 1
+
+
+def test_a_reply_still_empty_after_the_retries_is_delivered(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'requests.txt').write_text('M:OUTTMP\n')
+    start = datetime(2026, 7, 26, tzinfo=UTC)
+    calls = _replies(monkeypatch, [[]])
+    monkeypatch.setattr(nanny.time, 'sleep', lambda s: None)
+    out = tmp_path / 'out'
+    nanny.get_data(output_path=out, requests_list='requests.txt', output_format='parquet',
+                   start_time=start, end_time='20260726T010000Z', retry_empty=3)
+    assert len(calls) == 4
+    (f,) = out.rglob('*.parquet')
+    assert len(pd.read_parquet(f)) == 0
+    assert nanny.get_retry_empty({}, {}) == (2, 60.0)
+    assert nanny.get_retry_empty({}, {'retry-empty': 0, 'retry-pause': 5}) == (0, 5.0)
+
+
+def _empty_file(out, start, version='2_0_0'):
+    d = nanny.create_structured_path(out, start)
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f'{nanny.name_output_file(start, HOUR)}-{version}.parquet'
+    pd.DataFrame({'device': pd.Series(dtype=str), 'Timestamps': pd.Series(dtype='int64'),
+                  'Data': pd.Series(dtype=float)}).to_parquet(f, index=False)
+    return f
+
+
+def test_refill_replaces_empty_files_only_with_data(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'requests.txt').write_text('M:OUTTMP\n')
+    monkeypatch.setattr(nanny.time, 'sleep', lambda s: None)
+    start = datetime(2026, 4, 14, 2, tzinfo=UTC)
+    t0 = round(start.timestamp() * 1e6)
+    out = tmp_path / 'out'
+    empty_a = _empty_file(out, start)             # the reply will have data: replaced
+    empty_b = _empty_file(out, start + HOUR)      # the reply stays empty: kept
+    full = _empty_file(out, start + 2 * HOUR)
+    pd.DataFrame([('A', t0 + 2 * 3600 * 10**6, 1.0)], columns=['device', 'Timestamps', 'Data']).to_parquet(full)
+    assert nanny.empty_windows(out, '.parquet') == {(start, HOUR), (start + HOUR, HOUR)}
+
+    def reply(**kwargs):
+        s = kwargs['start_date']
+        rows = [('A', round(s.timestamp() * 1e6), 2.0)] if s == start else []
+        pd.DataFrame(rows, columns=['device', 'Timestamps', 'Data']).astype(
+            {'Timestamps': 'int64', 'Data': float}).to_parquet(kwargs['output_file'], index=False)
+        pulled.append(s)
+
+    pulled = []
+    monkeypatch.setattr(nanny.dpm_data, 'get_data', reply)
+    # Without refill nothing is missing.
+    nanny.get_data(output_path=out, requests_list='requests.txt', output_format='parquet',
+                   start_time=start, end_time='20260414T050000Z')
+    assert pulled == []
+    nanny.get_data(output_path=out, requests_list='requests.txt', output_format='parquet',
+                   start_time=start, end_time='20260414T050000Z', refill_empty=True, retry_empty=1)
+    assert sorted(set(pulled)) == [start, start + HOUR] and pulled.count(start + HOUR) == 2
+    assert not empty_a.exists() and empty_b.exists()
+    (new,) = [f for f in out.rglob(f'{nanny.name_output_file(start, HOUR)}-*.parquet')]
+    assert pd.read_parquet(new)['Data'].tolist() == [2.0]
+    assert nanny.empty_windows(out, '.parquet') == {(start + HOUR, HOUR)}
+    assert list((tmp_path / 'workbench').iterdir()) == []
+
+
+def test_refill_with_split_replaces_only_the_parts_with_data(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'requests.txt').write_text('M:OUTTMP\n')
+    start = datetime(2026, 4, 13, tzinfo=UTC)
+    t0 = round(start.timestamp() * 1e6)
+    out = tmp_path / 'out'
+    for k in range(3):
+        _empty_file(out, start + k * HOUR)
+    _replies(monkeypatch, [[('A', t0 + 3600 * 10**6 + 5, 1.0)]])  # data in the middle hour only
+    nanny.get_data(output_path=out, requests_list='requests.txt', output_format='parquet', start_time=start,
+                   end_time='20260413T030000Z', duration='T3H', split='T1H', refill_empty=True)
+    assert nanny.empty_windows(out, '.parquet') == {(start, HOUR), (start + 2 * HOUR, HOUR)}
+    assert len(list(out.rglob('*.parquet'))) == 3

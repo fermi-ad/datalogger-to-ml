@@ -1,6 +1,6 @@
 [project]
 name = "datalogger-to-ml"
-version = "1.9.0"
+version = "1.10.0"
 description = "Command line tool for extracting and saving Fermi control system historical data."
 authors = [{ name = "Beau Harrison", email = "beau@fnal.gov" }]
 readme = "README.md"
