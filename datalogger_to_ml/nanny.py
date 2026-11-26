@@ -38,7 +38,7 @@ def signal_handler(signal_num, _):
 def config_logging(logging_level):
     """Log to one rotating file, ./nanny.log, from every logger, formatted, at the given level.
 
-    The file rolls over at 1 GB and keeps 10 old files (nanny.log.1 to nanny.log.10). The handler sits on the
+    The file rolls over at 1 GB and keeps 1,000 old files (nanny.log.1 to nanny.log.1000). The handler sits on the
     root logger and carries the level itself, so a library logger set lower (pacsys, dpm_data's debug mode)
     cannot add lines below it. Before 1.10.1 a second, unformatted handler on this module's logger wrote its
     records twice, and the root's plain file handler (basicConfig) never rotated.
@@ -62,7 +62,7 @@ def config_logging(logging_level):
     handler = RotatingFileHandler(
         file_name,
         maxBytes=1073741824,  # maxBytes value = 1073741824 = 1 GB
-        backupCount=10
+        backupCount=1000
     )
     handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                                            datefmt='%d-%b-%y %H:%M:%S'))
