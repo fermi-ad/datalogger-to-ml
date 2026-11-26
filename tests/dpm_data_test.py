@@ -203,15 +203,18 @@ def test_window_of_source():
 
 
 def test_reading_to_frame_converts_and_warns(caplog):
-    """A millisecond device is converted and logged at INFO; an out-of-window one is written anyway, with a warning."""
+    """A millisecond device is converted, logged at DEBUG, and listed for the pull's summary line; an
+    out-of-window one is written anyway, with a warning."""
     import logging
     from datalogger_to_ml.dpm_data.dpm_data import _reading_to_frame
-    caplog.set_level(logging.INFO, logger='datalogger_to_ml.dpm_data.dpm_data')
+    caplog.set_level(logging.DEBUG, logger='datalogger_to_ml.dpm_data.dpm_data')
+    converted = []
     status = _reading_to_frame(_timed('S:X.STATUS.ON', [0.0, 1.0], [T0_US // 1000, T0_US // 1000 + 1000]),
-                               WINDOW, 'S:X.STATUS.ON@P,1000,true')
+                               WINDOW, 'S:X.STATUS.ON@P,1000,true', converted)
+    assert converted == [('S:X.STATUS.ON@P,1000,true', 'ms')]
     assert list(status['Timestamps']) == [T0_US, T0_US + 1_000_000]
     stray = _reading_to_frame(_timed('A', [1.0, 2.0], [T0_US, T0_US + 2 * HOUR_US]), WINDOW, 'A@P,1000,true')
     assert list(stray['Timestamps']) == [T0_US, T0_US + 2 * HOUR_US] and list(stray['Data']) == [1.0, 2.0]
     logged = {(r.levelname, r.getMessage()) for r in caplog.records}
-    assert ('INFO', 'S:X.STATUS.ON@P,1000,true: logger stamps arrived in ms; converted to microseconds') in logged
+    assert ('DEBUG', 'S:X.STATUS.ON@P,1000,true: logger stamps arrived in ms; converted to microseconds') in logged
     assert ('WARNING', 'A@P,1000,true: 1 of 2 stamps fall outside the requested window; written as received') in logged

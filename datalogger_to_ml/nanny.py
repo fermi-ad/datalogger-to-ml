@@ -36,40 +36,41 @@ def signal_handler(signal_num, _):
 
 
 def config_logging(logging_level):
+    """Log to one rotating file, ./nanny.log, from every logger, formatted, at the given level.
+
+    The file rolls over at 1 GB and keeps 10 old files (nanny.log.1 to nanny.log.10). The handler sits on the
+    root logger and carries the level itself, so a library logger set lower (pacsys, dpm_data's debug mode)
+    cannot add lines below it. Before 1.10.1 a second, unformatted handler on this module's logger wrote its
+    records twice, and the root's plain file handler (basicConfig) never rotated.
+    """
     file_name = 'nanny.log'
     level = logging.WARNING
 
     if isinstance(logging_level, int):
         level = logging_level
     elif isinstance(logging_level, str):
-        if logging_level == 'CRITICAL':
-            level = logging.CRITICAL
-        elif logging_level == 'ERROR':
-            level = logging.ERROR
-        elif logging_level == 'WARNING':
-            level = logging.WARNING
-        elif logging_level == 'INFO':
-            level = logging.INFO
-        elif logging_level == 'DEBUG':
-            level = logging.DEBUG
-        elif logging_level == 'NOTSET':
-            level = logging.NOTSET
+        level = logging.getLevelName(logging_level.upper())
+        if not isinstance(level, int):
+            raise ValueError(f'Unknown logging level: {logging_level}')
     else:
         raise TypeError
 
-    logging.basicConfig(
-        filename=file_name,
-        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-        datefmt='%d-%b-%y %H:%M:%S',
-        level=level
-    )
-
+    root = logging.getLogger()
+    for old in [h for h in root.handlers if getattr(h, 'nanny_log', False)]:
+        root.removeHandler(old)  # a second call (tests, or runs from several folders) replaces it
+        old.close()
     handler = RotatingFileHandler(
         file_name,
         maxBytes=1073741824,  # maxBytes value = 1073741824 = 1 GB
         backupCount=10
     )
-    logger.addHandler(handler)
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+                                           datefmt='%d-%b-%y %H:%M:%S'))
+    handler.setLevel(level)
+    handler.nanny_log = True
+    root.addHandler(handler)
+    root.setLevel(level)
+    return handler
 
 
 def write_output(file, output):

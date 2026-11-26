@@ -400,3 +400,32 @@ def test_refill_with_split_replaces_only_the_parts_with_data(tmp_path, monkeypat
                    end_time='20260413T030000Z', duration='T3H', split='T1H', refill_empty=True)
     assert nanny.empty_windows(out, '.parquet') == {(start, HOUR), (start + 2 * HOUR, HOUR)}
     assert len(list(out.rglob('*.parquet'))) == 3
+
+
+def test_config_logging_one_rotating_formatted_file(tmp_path, monkeypatch):
+    """Each record lands once, formatted; lines below the level from loggers set lower (pacsys) stay out;
+    a second call replaces the handler; the file rolls over at 1 GB, 10 old files kept (1.10.1)."""
+    from logging.handlers import RotatingFileHandler
+    monkeypatch.chdir(tmp_path)
+    root = logging.getLogger()
+    saved = (root.handlers[:], root.level)
+    try:
+        nanny.config_logging('INFO')
+        handler = nanny.config_logging('INFO')
+        mine = [h for h in root.handlers if isinstance(h, RotatingFileHandler)]
+        assert mine == [handler]
+        assert handler.maxBytes == 1073741824 and handler.backupCount == 10
+        noisy = logging.getLogger('pacsys.test')
+        noisy.setLevel(logging.DEBUG)
+        noisy.debug('chunk received')
+        nanny.logger.info('Pulled %s in %.1f s.', 'X', 1.0)
+        handler.flush()
+        lines = (tmp_path / 'nanny.log').read_text().splitlines()
+        assert len(lines) == 1
+        assert lines[0].endswith(' - INFO - datalogger_to_ml.nanny - Pulled X in 1.0 s.')
+    finally:
+        for h in root.handlers[:]:
+            if h not in saved[0]:
+                root.removeHandler(h)
+                h.close()
+        root.setLevel(saved[1])

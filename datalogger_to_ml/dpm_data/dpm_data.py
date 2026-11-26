@@ -28,10 +28,6 @@ IMPLEMENTED_OUTPUT_FORMATS = {
     'parquet': '.parquet',
 }
 
-# Set the pacsys log to DEBUG
-pacsys_log = logging.getLogger('pacsys')
-pacsys_log.setLevel(logging.DEBUG)
-
 # Local logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
@@ -149,14 +145,15 @@ def window_of_source(data_source):
     return (int(match[1]) * 1000, int(match[2]) * 1000) if match else None
 
 
-def _reading_to_frame(reading, window_us=None, request=None):
+def _reading_to_frame(reading, window_us=None, request=None, converted=None):
     """Turn a pacsys logger reading into a frame of Timestamps (microseconds) and Data.
 
     pacsys joins the logger's reply chunks into one timed array. Array devices give one row per
     record, with a Data[i] column per element. Returns None when the reading carries no data.
-    Stamps go through to_microseconds and every point is kept. A rescaling that fits is logged at INFO,
-    since the status channels need one on every read until the cause is fixed; stamps outside the
-    window are logged as a warning.
+    Stamps go through to_microseconds and every point is kept. A rescaling that fits is logged at DEBUG
+    per device and, when `converted` (a list) is given, the device and unit are appended to it for one
+    summary line at INFO (the status channels need one on every read until the cause is fixed); stamps
+    outside the window are logged as a warning.
     """
     if not reading.ok or reading.value_type != ValueType.TIMED_SCALAR_ARRAY:
         return None
@@ -164,7 +161,9 @@ def _reading_to_frame(reading, window_us=None, request=None):
     micros, unit, n_outside = to_microseconds(reading.value['micros'], window_us)
     name = request or reading.drf
     if unit != 'us':
-        logger.info('%s: logger stamps arrived in %s; converted to microseconds', name, unit)
+        logger.debug('%s: logger stamps arrived in %s; converted to microseconds', name, unit)
+        if converted is not None:
+            converted.append((name, unit))
     if n_outside:
         logger.warning('%s: %d of %d stamps fall outside the requested window; written as received',
                        name, n_outside, len(micros))
@@ -185,9 +184,9 @@ def _read_logger(device_list, store, data_source, dpm_host=None,
     logger.info('Data acquisition complete')
 
     window_us = window_of_source(data_source)
-    status_replies = []
+    status_replies, converted = [], []
     for request, reading in zip(device_list, readings):
-        frame = _reading_to_frame(reading, window_us, request)
+        frame = _reading_to_frame(reading, window_us, request, converted)
         if frame is not None and len(frame):
             store.append(request, frame)
         if not reading.ok:
@@ -200,6 +199,10 @@ def _read_logger(device_list, store, data_source, dpm_host=None,
             True if reading.ok else (reading.message or reading.error_code)
         )
 
+    if converted:
+        units = sorted({unit for _, unit in converted})
+        logger.info('%d devices\' logger stamps arrived in %s; converted to microseconds (first: %s)',
+                    len(converted), ', '.join(units), converted[0][0])
     compare_device_list(store.keys(), device_list, status_replies)
 
 
